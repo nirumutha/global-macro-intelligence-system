@@ -26,7 +26,7 @@ assets = {
 }
 
 START_DATE = '2010-01-01'
-END_DATE   = '2024-12-31'
+END_DATE   = '2026-02-23'
 
 # ── Download each asset and save as CSV ─────────────────────
 print("Starting data download...\n")
