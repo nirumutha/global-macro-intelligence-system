@@ -190,7 +190,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption(f"Data updated: {max_date}")
     st.caption("Global Macro Intelligence System")
-    st.caption("Built by Niraj Mutha — 2025")
+    st.caption("Built by Niraj Mutha — 2026")
 
 # ── Filter data by date ───────────────────────────────────────
 def filter_series(s):
