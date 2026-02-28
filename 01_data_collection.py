@@ -8,7 +8,7 @@ import pandas as pd
 import os
 
 # ── Create data folder path ──────────────────────────────────
-data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data')
+data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 os.makedirs(data_path, exist_ok=True)
 
 # ── Define all assets to download ───────────────────────────
@@ -26,7 +26,8 @@ assets = {
 }
 
 START_DATE = '2010-01-01'
-END_DATE   = '2026-02-23'
+from datetime import datetime
+END_DATE = datetime.now().strftime('%Y-%m-%d')
 
 # ── Download each asset and save as CSV ─────────────────────
 print("Starting data download...\n")

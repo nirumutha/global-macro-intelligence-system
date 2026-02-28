@@ -12,7 +12,8 @@ data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 os.makedirs(data_path, exist_ok=True)
 
 START_DATE = '2010-01-01'
-END_DATE   = '2026-02-23'
+from datetime import datetime
+END_DATE = datetime.now().strftime('%Y-%m-%d')
 
 # ── Define FRED series to download ───────────────────────────
 fred_series = {

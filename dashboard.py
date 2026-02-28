@@ -169,7 +169,7 @@ with st.sidebar:
     st.subheader("📅 Date Range")
     min_date = nifty.index.min().date()
     max_date = nifty.index.max().date()
-    start_date = st.date_input("From", value=datetime(2020, 1, 1).date(),
+    start_date = st.date_input("From", value=datetime(2015, 1, 1).date(),
                                 min_value=min_date, max_value=max_date)
     end_date   = st.date_input("To",   value=max_date,
                                 min_value=min_date, max_value=max_date)
