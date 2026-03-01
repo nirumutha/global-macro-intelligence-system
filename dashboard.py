@@ -275,7 +275,7 @@ with col1:
     st.markdown(f"""
     <div class='metric-card {color_cls}'>
         <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>Market Regime</div>
-        <div style='font-size:20px; font-weight:bold; color:{regime_color};'>{regime_label}</div>
+        <div style='font-size:20px; font-weight:bold; color:#1F3864; color:{regime_color};'>{regime_label}</div>
         <div style='font-size:11px; color:{GRAY};'>VIX: {curr_vix:.1f}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -284,7 +284,7 @@ with col2:
     st.markdown(f"""
     <div class='metric-card {"metric-positive" if d_nifty >= 0 else "metric-negative"}'>
         <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>NIFTY 50</div>
-        <div style='font-size:20px; font-weight:bold;'>{curr_nifty:,.0f}</div>
+        <div style='font-size:20px; font-weight:bold; color:#1F3864;'>{curr_nifty:,.0f}</div>
         <div>{delta_arrow(d_nifty)}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -293,7 +293,7 @@ with col3:
     st.markdown(f"""
     <div class='metric-card {"metric-positive" if d_sp >= 0 else "metric-negative"}'>
         <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>S&P 500</div>
-        <div style='font-size:20px; font-weight:bold;'>{curr_sp500:,.0f}</div>
+        <div style='font-size:20px; font-weight:bold; color:#1F3864;'>{curr_sp500:,.0f}</div>
         <div>{delta_arrow(d_sp)}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -302,7 +302,7 @@ with col4:
     st.markdown(f"""
     <div class='metric-card {"metric-positive" if d_gold >= 0 else "metric-negative"}'>
         <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>Gold (USD)</div>
-        <div style='font-size:20px; font-weight:bold;'>${curr_gold:,.0f}</div>
+        <div style='font-size:20px; font-weight:bold; color:#1F3864;'>${curr_gold:,.0f}</div>
         <div>{delta_arrow(d_gold)}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -313,7 +313,7 @@ with col5:
     st.markdown(f"""
     <div class='metric-card {sent_color}'>
         <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>Sentiment</div>
-        <div style='font-size:20px; font-weight:bold;'>{overall_sentiment}</div>
+        <div style='font-size:20px; font-weight:bold; color:#1F3864;'>{overall_sentiment}</div>
         <div style='font-size:11px; color:{GRAY};'>Score: {sentiment_score:+.3f}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -361,7 +361,7 @@ st.markdown("---")
 # ════════════════════════════════════════════════════════════════════
 st.markdown("### 📈 Layer 2 — Interactive Analysis")
 
-tab1, tab2, tab3, tab4 = st.tabs(["🌍 Macro", "📊 Volatility", "💱 FX & Bonds", "😐 Sentiment"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🌍 Macro", "📊 Volatility", "💱 FX & Bonds", "😐 Sentiment", "📉 Backtest"])
 
 # ── TAB 1: MACRO ──────────────────────────────────────────────
 with tab1:
@@ -582,7 +582,334 @@ with tab4:
                 .sort_values('score', ascending=False),
                 use_container_width=True
             )
+# ── TAB 5: BACKTEST ───────────────────────────────────────────
+with tab5:
+    st.subheader("Signal Strategy vs Buy-and-Hold Backtest")
+    st.caption("15 years of real data | Transaction cost: 0.1% per trade | No leverage")
 
+    # ── Load signals from database ────────────────────────────
+    @st.cache_data(ttl=3600)
+    def load_signals():
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            df = pd.read_sql("SELECT * FROM SIGNALS", conn)
+            conn.close()
+            df['Date'] = pd.to_datetime(df['Date'])
+            df = df.set_index('Date').sort_index()
+            return df
+        except:
+            conn.close()
+            return pd.DataFrame()
+
+    signals = load_signals()
+
+    if signals.empty:
+        st.warning("No signal data found. Run 12_signal_engine.py first.")
+    else:
+        # ── Backtest engine ───────────────────────────────────
+        def run_backtest_dash(price, signal_scores,
+                               transaction_cost=0.001,
+                               threshold=0.15):
+            sig      = signal_scores.reindex(price.index).ffill().bfill()
+            daily_ret= price.pct_change().fillna(0)
+            position = pd.Series(0.0, index=price.index)
+            position[sig >= threshold]  = 1.0
+            position[sig <= -threshold] = 0.0
+            pos_change = position.diff().abs().fillna(0)
+            strat_ret  = position.shift(1) * daily_ret
+            strat_ret -= pos_change * transaction_cost
+            bnh_ret    = daily_ret.copy()
+            strat_eq   = (1 + strat_ret).cumprod() * 100
+            bnh_eq     = (1 + bnh_ret).cumprod()   * 100
+
+            def metrics(ret, eq):
+                n_years  = len(ret) / 252
+                total    = eq.iloc[-1] / 100
+                cagr     = (total ** (1/n_years) - 1) * 100 if n_years > 0 and total > 0 else 0
+                sharpe   = (ret.mean() / (ret.std() + 1e-10)) * np.sqrt(252)
+                roll_max = eq.cummax()
+                maxdd    = ((eq - roll_max) / roll_max).min() * 100
+                sortino  = (ret.mean() / (ret[ret<0].std() + 1e-10)) * np.sqrt(252)
+                winrate  = (ret > 0).sum() / (ret != 0).sum() * 100
+                return {
+                    'CAGR': cagr, 'Sharpe': sharpe,
+                    'MaxDD': maxdd, 'Sortino': sortino,
+                    'WinRate': winrate,
+                }
+
+            return {
+                'strat_eq':  strat_eq,
+                'bnh_eq':    bnh_eq,
+                'strat_ret': strat_ret,
+                'bnh_ret':   bnh_ret,
+                'position':  position,
+                'strat_m':   metrics(strat_ret, strat_eq),
+                'bnh_m':     metrics(bnh_ret,   bnh_eq),
+                'drawdown':  ((strat_eq - strat_eq.cummax()) /
+                               strat_eq.cummax() * 100),
+            }
+
+        # ── Asset selector ────────────────────────────────────
+        bt_asset = st.selectbox(
+            "Select asset to backtest",
+            ["NIFTY 50", "S&P 500", "Gold", "Silver", "Crude WTI"],
+            key="bt_asset"
+        )
+
+        asset_map = {
+            "NIFTY 50":  (nifty,  'NIFTY_score'),
+            "S&P 500":   (sp500,  'SP500_score'),
+            "Gold":      (gold,   'Gold_score'),
+            "Silver":    (silver, 'Silver_score'),
+            "Crude WTI": (crude,  'Crude_score'),
+        }
+        color_map_bt = {
+            "NIFTY 50": BLUE, "S&P 500": MID_BLUE,
+            "Gold": ORANGE, "Silver": "#7030A0", "Crude WTI": "#1E6B3C",
+        }
+
+        price_series, score_col = asset_map[bt_asset]
+        color_bt = color_map_bt[bt_asset]
+
+        if score_col in signals.columns:
+            bt = run_backtest_dash(price_series, signals[score_col])
+
+            # ── Metrics row ───────────────────────────────────
+            st.markdown("#### Performance Metrics")
+            m1, m2, m3, m4, m5 = st.columns(5)
+
+            sm = bt['strat_m']
+            bm = bt['bnh_m']
+
+            m1.metric(
+                "Strategy CAGR",
+                f"{sm['CAGR']:+.1f}%",
+                f"{sm['CAGR']-bm['CAGR']:+.1f}% vs B&H"
+            )
+            m2.metric(
+                "Sharpe Ratio",
+                f"{sm['Sharpe']:.2f}",
+                f"{sm['Sharpe']-bm['Sharpe']:+.2f} vs B&H"
+            )
+            m3.metric(
+                "Max Drawdown",
+                f"{sm['MaxDD']:.1f}%",
+                f"{sm['MaxDD']-bm['MaxDD']:+.1f}% vs B&H",
+                delta_color="inverse"
+            )
+            m4.metric(
+                "Sortino Ratio",
+                f"{sm['Sortino']:.2f}",
+                f"{sm['Sortino']-bm['Sortino']:+.2f} vs B&H"
+            )
+            m5.metric(
+                "Win Rate",
+                f"{sm['WinRate']:.1f}%",
+                None
+            )
+
+            # ── Equity curve ──────────────────────────────────
+            st.markdown("#### Equity Curve")
+
+            fig_eq = go.Figure()
+            fig_eq.add_trace(go.Scatter(
+                x=bt['strat_eq'].index,
+                y=bt['strat_eq'].values,
+                name=f'Signal Strategy',
+                line=dict(color=color_bt, width=2),
+                hovertemplate='Strategy: %{y:.1f}<extra></extra>'
+            ))
+            fig_eq.add_trace(go.Scatter(
+                x=bt['bnh_eq'].index,
+                y=bt['bnh_eq'].values,
+                name='Buy & Hold',
+                line=dict(color='gray', width=1.5, dash='dash'),
+                hovertemplate='B&H: %{y:.1f}<extra></extra>'
+            ))
+
+            # Shade outperformance
+            bnh_r = bt['bnh_eq'].reindex(bt['strat_eq'].index)
+            fig_eq.add_trace(go.Scatter(
+                x=bt['strat_eq'].index.tolist() +
+                   bt['strat_eq'].index.tolist()[::-1],
+                y=bt['strat_eq'].values.tolist() +
+                   bnh_r.values.tolist()[::-1],
+                fill='toself',
+                fillcolor='rgba(30,107,60,0.08)',
+                line=dict(color='rgba(255,255,255,0)'),
+                name='Outperformance',
+                showlegend=True
+            ))
+
+            fig_eq.add_hline(y=100, line_dash="dot",
+                              line_color="gray", line_width=0.8,
+                              annotation_text="Starting value")
+            fig_eq.update_layout(
+                height=420,
+                template="plotly_white",
+                yaxis_title="Portfolio Value (Base 100)",
+                hovermode="x unified",
+                legend=dict(orientation="h",
+                             yanchor="bottom", y=1.02,
+                             xanchor="right", x=1)
+            )
+            st.plotly_chart(fig_eq, use_container_width=True)
+
+            # ── Drawdown chart ────────────────────────────────
+            st.markdown("#### Drawdown Analysis")
+
+            bnh_dd = ((bt['bnh_eq'] - bt['bnh_eq'].cummax()) /
+                       bt['bnh_eq'].cummax() * 100)
+
+            fig_dd = go.Figure()
+            fig_dd.add_trace(go.Scatter(
+                x=bt['drawdown'].index,
+                y=bt['drawdown'].values,
+                fill='tozeroy',
+                fillcolor=f'rgba(30,107,60,0.3)',
+                line=dict(color=color_bt, width=1),
+                name='Strategy Drawdown'
+            ))
+            fig_dd.add_trace(go.Scatter(
+                x=bnh_dd.index,
+                y=bnh_dd.values,
+                line=dict(color='gray', width=1, dash='dash'),
+                name='B&H Drawdown'
+            ))
+            fig_dd.update_layout(
+                height=300,
+                template="plotly_white",
+                yaxis_title="Drawdown (%)",
+                hovermode="x unified"
+            )
+            st.plotly_chart(fig_dd, use_container_width=True)
+
+            # ── Position chart ────────────────────────────────
+            st.markdown("#### Signal Position Over Time")
+
+            fig_pos = go.Figure()
+            fig_pos.add_trace(go.Scatter(
+                x=bt['position'].index,
+                y=bt['position'].values,
+                fill='tozeroy',
+                fillcolor='rgba(30,107,60,0.2)',
+                line=dict(color=color_bt, width=0.8),
+                name='Position (1=Long, 0=Cash)'
+            ))
+            fig_pos.update_layout(
+                height=200,
+                template="plotly_white",
+                yaxis_title="Position",
+                yaxis=dict(tickvals=[0, 1],
+                            ticktext=['Cash', 'Long']),
+                hovermode="x unified"
+            )
+            st.plotly_chart(fig_pos, use_container_width=True)
+
+            # ── Commentary ────────────────────────────────────
+            beats = sm['CAGR'] > bm['CAGR']
+            dd_saved = sm['MaxDD'] - bm['MaxDD']
+            sharpe_better = sm['Sharpe'] > bm['Sharpe']
+
+            st.markdown(f"""<div class='commentary-box'>
+            📌 <strong>Backtest Commentary — {bt_asset}:</strong>
+            The signal strategy achieved a CAGR of <strong>{sm['CAGR']:+.1f}%</strong>
+            vs <strong>{bm['CAGR']:+.1f}%</strong> for buy-and-hold.
+            Sharpe ratio: <strong>{sm['Sharpe']:.2f}</strong>
+            vs <strong>{bm['Sharpe']:.2f}</strong> for B&H
+            ({'✅ better' if sharpe_better else '⚠️ lower'} risk-adjusted returns).
+            Maximum drawdown was <strong>{sm['MaxDD']:.1f}%</strong>
+            vs <strong>{bm['MaxDD']:.1f}%</strong> for B&H —
+            the strategy saved <strong>{abs(dd_saved):.1f} percentage points</strong>
+            of drawdown by moving to cash during bad regimes.
+            </div>""", unsafe_allow_html=True)
+
+        else:
+            st.warning(f"Signal scores not found for {bt_asset}. "
+                        f"Run 12_signal_engine.py first.")
+
+        # ── Combined portfolio summary ────────────────────────
+        st.markdown("---")
+        st.markdown("#### Combined Portfolio — All 5 Assets Equal Weight")
+
+        try:
+            all_strat_rets = []
+            all_bnh_rets   = []
+
+            for asset_name, (price_s, score_c) in asset_map.items():
+                if score_c in signals.columns:
+                    bt_temp = run_backtest_dash(price_s, signals[score_c])
+                    all_strat_rets.append(bt_temp['strat_ret'])
+                    all_bnh_rets.append(bt_temp['bnh_ret'])
+
+            if all_strat_rets:
+                port_ret  = pd.concat(all_strat_rets, axis=1).dropna().mean(axis=1)
+                port_eq   = (1 + port_ret).cumprod() * 100
+                bnh_port  = pd.concat(all_bnh_rets,   axis=1).dropna().mean(axis=1)
+                bnh_port_eq = (1 + bnh_port).cumprod() * 100
+
+                n_years    = len(port_ret) / 252
+                port_cagr  = ((port_eq.iloc[-1]/100)**(1/n_years)-1)*100
+                port_sharpe= (port_ret.mean()/(port_ret.std()+1e-10))*np.sqrt(252)
+                port_dd    = ((port_eq-port_eq.cummax())/port_eq.cummax()*100).min()
+                bnh_cagr   = ((bnh_port_eq.iloc[-1]/100)**(1/n_years)-1)*100
+                bnh_sharpe = (bnh_port.mean()/(bnh_port.std()+1e-10))*np.sqrt(252)
+                bnh_dd     = ((bnh_port_eq-bnh_port_eq.cummax())/
+                               bnh_port_eq.cummax()*100).min()
+
+                p1, p2, p3, p4 = st.columns(4)
+                p1.metric("Portfolio CAGR",
+                           f"{port_cagr:+.1f}%",
+                           f"{port_cagr-bnh_cagr:+.1f}% vs B&H")
+                p2.metric("Portfolio Sharpe",
+                           f"{port_sharpe:.2f}",
+                           f"{port_sharpe-bnh_sharpe:+.2f} vs B&H")
+                p3.metric("Portfolio MaxDD",
+                           f"{port_dd:.1f}%",
+                           f"{port_dd-bnh_dd:+.1f}% vs B&H",
+                           delta_color="inverse")
+                p4.metric("B&H Sharpe",
+                           f"{bnh_sharpe:.2f}",
+                           None)
+
+                fig_port = go.Figure()
+                fig_port.add_trace(go.Scatter(
+                    x=port_eq.index, y=port_eq.values,
+                    name=f'Signal Portfolio (Sharpe: {port_sharpe:.2f})',
+                    line=dict(color=BLUE, width=2)
+                ))
+                fig_port.add_trace(go.Scatter(
+                    x=bnh_port_eq.index, y=bnh_port_eq.values,
+                    name=f'B&H Portfolio (Sharpe: {bnh_sharpe:.2f})',
+                    line=dict(color='gray', width=1.5, dash='dash')
+                ))
+                fig_port.add_hline(y=100, line_dash="dot",
+                                    line_color="gray", line_width=0.8)
+                fig_port.update_layout(
+                    height=380,
+                    template="plotly_white",
+                    yaxis_title="Portfolio Value (Base 100)",
+                    hovermode="x unified",
+                    title=f"Combined Portfolio: Sharpe {port_sharpe:.2f} "
+                           f"vs B&H {bnh_sharpe:.2f}"
+                )
+                st.plotly_chart(fig_port, use_container_width=True)
+
+                st.markdown(f"""<div class='commentary-box'>
+                📌 <strong>Portfolio Summary:</strong>
+                The combined equal-weight signal portfolio achieved a Sharpe ratio of
+                <strong>{port_sharpe:.2f}</strong> vs <strong>{bnh_sharpe:.2f}</strong>
+                for buy-and-hold — a <strong>{port_sharpe/bnh_sharpe:.1f}x</strong>
+                improvement in risk-adjusted returns.
+                CAGR: <strong>{port_cagr:+.1f}%</strong> vs
+                <strong>{bnh_cagr:+.1f}%</strong> B&H.
+                Maximum drawdown: <strong>{port_dd:.1f}%</strong> vs
+                <strong>{bnh_dd:.1f}%</strong> B&H.
+                </div>""", unsafe_allow_html=True)
+
+        except Exception as e:
+            st.error(f"Portfolio calculation error: {e}")
+            
 st.markdown("---")
 
 # ════════════════════════════════════════════════════════════════════
