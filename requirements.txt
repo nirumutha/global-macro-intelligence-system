@@ -1,0 +1,14 @@
+streamlit
+pandas
+numpy
+yfinance
+matplotlib
+plotly
+sqlalchemy
+statsmodels
+prophet
+vaderSentiment
+feedparser
+scikit-learn
+requests
+fredapi

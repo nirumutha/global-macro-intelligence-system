@@ -313,7 +313,7 @@ with col5:
     st.markdown(f"""
     <div class='metric-card {sent_color}'>
         <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>Sentiment</div>
-        <div style='font-size:20px; font-weight:bold; color:#1F3864;'>{overall_sentiment}</div>
+        <div style='font-size:20px; font-weight:bold color:#1F3864;'>{overall_sentiment}</div>
         <div style='font-size:11px; color:{GRAY};'>Score: {sentiment_score:+.3f}</div>
     </div>""", unsafe_allow_html=True)
 
