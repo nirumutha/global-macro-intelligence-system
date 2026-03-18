@@ -1,2 +1,4 @@
 data/macro_system.db
 data/
+.env
+data/alert_state.json
