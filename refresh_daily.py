@@ -36,6 +36,7 @@ scripts = [
     '03_database_setup.py',      # Rebuild database
     '15_finbert_sentiment.py',   # FinBERT sentiment (replaces 09)
     '12_signal_engine.py',       # Recalculate signals
+    '16_signal_v3.py',
     '14_alert_engine.py',        # Check for alerts and notify
 ]
 
