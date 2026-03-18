@@ -1,9 +1,6 @@
 # ============================================================
-# GLOBAL MACRO INTELLIGENCE SYSTEM
-# Three-Layer Professional Streamlit Dashboard
-# Layer 1: Headline signals (60-second test)
-# Layer 2: Interactive charts (context)
-# Layer 3: Deep dive tables (expanders)
+# GLOBAL MACRO INTELLIGENCE SYSTEM — DASHBOARD v2
+# GMIS 1.0 + GMIS 2.0 integrated
 # ============================================================
 
 import streamlit as st
@@ -24,16 +21,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ── Colour system (strict palette) ───────────────────────────
-GREEN   = "#1E6B3C"
-RED     = "#C00000"
-BLUE    = "#1F3864"
-MID_BLUE= "#2E75B6"
-ORANGE  = "#C55A11"
-GRAY    = "#595959"
-LIGHT   = "#F4F4F4"
+# ── Colour system ─────────────────────────────────────────────
+GREEN    = "#1E6B3C"
+RED      = "#C00000"
+BLUE     = "#1F3864"
+MID_BLUE = "#2E75B6"
+ORANGE   = "#C55A11"
+GRAY     = "#595959"
+LIGHT    = "#F4F4F4"
 
-# ── CSS styling ───────────────────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────
 st.markdown("""
 <style>
     .main { background-color: #FAFAFA; }
@@ -73,9 +70,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Database connection ───────────────────────────────────────
+# ── Database path ─────────────────────────────────────────────
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 DB_PATH   = os.path.join(BASE_PATH, 'data', 'macro_system.db')
+
+# ═════════════════════════════════════════════════════════════
+# DATA LOADERS
+# ═════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=300)
 def load_close(table):
@@ -84,8 +85,10 @@ def load_close(table):
     conn.close()
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.set_index('Date').sort_index()
-    close_col = [c for c in df.columns if 'Close' in c or 'close' in c]
-    return df[close_col[0]].dropna() if close_col else df.iloc[:, 0].dropna()
+    close_col = [c for c in df.columns
+                 if 'Close' in c or 'close' in c]
+    return df[close_col[0]].dropna() \
+           if close_col else df.iloc[:, 0].dropna()
 
 @st.cache_data(ttl=300)
 def load_macro(table):
@@ -107,21 +110,66 @@ def load_sentiment():
         conn.close()
         return pd.DataFrame()
 
-# ── Load all data ─────────────────────────────────────────────
-nifty     = load_close('NIFTY50')
-sp500     = load_close('SP500')
-gold      = load_close('GOLD')
-silver    = load_close('SILVER')
-crude     = load_close('CRUDE_WTI')
-vix_us    = load_close('VIX_US')
-vix_india = load_close('VIX_INDIA')
-usd_inr   = load_close('USD_INR')
-dxy       = load_close('DXY')
-yield_10y = load_macro('US_10Y_YIELD')
-yield_2y  = load_macro('US_2Y_YIELD')
-sentiment_df = load_sentiment()
+@st.cache_data(ttl=300)
+def load_signals_v3():
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql("SELECT * FROM SIGNALS_V3", conn)
+        conn.close()
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df.set_index('Date').sort_index()
+        return df
+    except:
+        conn.close()
+        return pd.DataFrame()
 
-# ── Helper functions ──────────────────────────────────────────
+@st.cache_data(ttl=300)
+def load_analog_outcomes():
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        analogs  = pd.read_sql("SELECT * FROM ANALOG_DATES", conn)
+        outcomes = pd.read_sql("SELECT * FROM ANALOG_OUTCOMES", conn)
+        conn.close()
+        return analogs, outcomes
+    except:
+        conn.close()
+        return pd.DataFrame(), pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def load_walkforward():
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        results   = pd.read_sql(
+            "SELECT * FROM WALKFORWARD_RESULTS", conn)
+        portfolio = pd.read_sql(
+            "SELECT * FROM WALKFORWARD_PORTFOLIO", conn)
+        conn.close()
+        return results, portfolio
+    except:
+        conn.close()
+        return pd.DataFrame(), pd.DataFrame()
+
+# ── Load all data ─────────────────────────────────────────────
+nifty        = load_close('NIFTY50')
+sp500        = load_close('SP500')
+gold         = load_close('GOLD')
+silver       = load_close('SILVER')
+crude        = load_close('CRUDE_WTI')
+vix_us       = load_close('VIX_US')
+vix_india    = load_close('VIX_INDIA')
+usd_inr      = load_close('USD_INR')
+dxy          = load_close('DXY')
+yield_10y    = load_macro('US_10Y_YIELD')
+yield_2y     = load_macro('US_2Y_YIELD')
+sentiment_df = load_sentiment()
+signals_v3_df            = load_signals_v3()
+analog_dates, analog_outcomes = load_analog_outcomes()
+wf_results, wf_portfolio = load_walkforward()
+
+# ═════════════════════════════════════════════════════════════
+# HELPER FUNCTIONS
+# ═════════════════════════════════════════════════════════════
+
 def get_regime(vix_val, sp_above_ma):
     if vix_val > 30:
         return "Crisis", RED
@@ -145,13 +193,12 @@ def delta_arrow(val):
     return f"<span style='color:{GRAY}'>→ {val:.2f}%</span>"
 
 def generate_signal(asset_name, price_series, vix_series):
-    """Simple rule-based signal for demonstration."""
     if len(price_series) < 60:
         return "Neutral", ORANGE
-    ma20  = price_series.rolling(20).mean().iloc[-1]
-    ma60  = price_series.rolling(60).mean().iloc[-1]
-    curr  = price_series.iloc[-1]
-    vix   = vix_series.iloc[-1]
+    ma20 = price_series.rolling(20).mean().iloc[-1]
+    ma60 = price_series.rolling(60).mean().iloc[-1]
+    curr = price_series.iloc[-1]
+    vix  = vix_series.iloc[-1]
     if curr > ma20 > ma60 and vix < 25:
         return "Long", GREEN
     elif curr < ma20 < ma60 or vix > 30:
@@ -159,23 +206,43 @@ def generate_signal(asset_name, price_series, vix_series):
     else:
         return "Neutral", ORANGE
 
-# ── Sidebar ───────────────────────────────────────────────────
+def get_v3_signal(asset):
+    if signals_v3_df.empty:
+        return 'Neutral', 0.0, 'N/A', 'Neutral'
+    try:
+        latest     = signals_v3_df.iloc[-1]
+        signal     = latest.get(f'{asset}_signal',     'Neutral')
+        score      = latest.get(f'{asset}_score',      0.0)
+        confidence = latest.get(f'{asset}_confidence', 'NONE')
+        stable     = latest.get(f'{asset}_stable',     signal)
+        return signal, float(score), confidence, stable
+    except:
+        return 'Neutral', 0.0, 'N/A', 'Neutral'
+
+# ═════════════════════════════════════════════════════════════
+# SIDEBAR
+# ═════════════════════════════════════════════════════════════
+
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/48/combo-chart.png", width=48)
+    st.image(
+        "https://img.icons8.com/fluency/48/combo-chart.png",
+        width=48
+    )
     st.title("GMIS Controls")
     if st.sidebar.button("🔄 Clear Cache & Refresh"):
         st.cache_data.clear()
         st.rerun()
     st.markdown("---")
 
-    # Date range filter
     st.subheader("📅 Date Range")
-    min_date = nifty.index.min().date()
-    max_date = nifty.index.max().date()
-    start_date = st.date_input("From", value=datetime(2015, 1, 1).date(),
-                                min_value=min_date, max_value=max_date)
-    end_date   = st.date_input("To",   value=max_date,
-                                min_value=min_date, max_value=max_date)
+    min_date   = nifty.index.min().date()
+    max_date   = nifty.index.max().date()
+    start_date = st.date_input(
+        "From", value=datetime(2015, 1, 1).date(),
+        min_value=min_date, max_value=max_date)
+    end_date   = st.date_input(
+        "To", value=max_date,
+        min_value=min_date, max_value=max_date)
 
     st.markdown("---")
     st.subheader("🎯 Market Focus")
@@ -187,8 +254,8 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("⚙️ Signal Settings")
-    vix_crisis = st.slider("VIX Crisis Level", 20, 50, 30)
-    vix_caution= st.slider("VIX Caution Level", 10, 30, 20)
+    vix_crisis  = st.slider("VIX Crisis Level",  20, 50, 30)
+    vix_caution = st.slider("VIX Caution Level", 10, 30, 20)
 
     st.markdown("---")
     st.caption(f"Data updated: {max_date}")
@@ -197,7 +264,10 @@ with st.sidebar:
 
 # ── Filter data by date ───────────────────────────────────────
 def filter_series(s):
-    return s[(s.index.date >= start_date) & (s.index.date <= end_date)]
+    return s[
+        (s.index.date >= start_date) &
+        (s.index.date <= end_date)
+    ]
 
 nifty_f   = filter_series(nifty)
 sp500_f   = filter_series(sp500)
@@ -208,47 +278,64 @@ vix_f     = filter_series(vix_us)
 usd_inr_f = filter_series(usd_inr)
 dxy_f     = filter_series(dxy)
 
-# ── Current values & deltas ───────────────────────────────────
+# ── Current values ────────────────────────────────────────────
 def safe_last(s, n=1):
     return s.iloc[-n] if len(s) >= n else np.nan
 
-curr_nifty  = safe_last(nifty_f)
-prev_nifty  = safe_last(nifty_f, 2)
-curr_sp500  = safe_last(sp500_f)
-prev_sp500  = safe_last(sp500_f, 2)
-curr_gold   = safe_last(gold_f)
-prev_gold   = safe_last(gold_f, 2)
-curr_vix    = safe_last(vix_f)
-curr_inr    = safe_last(usd_inr_f)
-prev_inr    = safe_last(usd_inr_f, 2)
+curr_nifty = safe_last(nifty_f)
+prev_nifty = safe_last(nifty_f, 2)
+curr_sp500 = safe_last(sp500_f)
+prev_sp500 = safe_last(sp500_f, 2)
+curr_gold  = safe_last(gold_f)
+prev_gold  = safe_last(gold_f, 2)
+curr_vix   = safe_last(vix_f)
+curr_inr   = safe_last(usd_inr_f)
+prev_inr   = safe_last(usd_inr_f, 2)
 
 # Regime
-sp_ma200      = sp500_f.rolling(200).mean()
-sp_above_ma   = curr_sp500 > sp_ma200.iloc[-1] if len(sp_ma200) > 0 else False
+sp_ma200    = sp500_f.rolling(200).mean()
+sp_above_ma = curr_sp500 > sp_ma200.iloc[-1] \
+              if len(sp_ma200) > 0 else False
 regime_label, regime_color = get_regime(curr_vix, sp_above_ma)
 
 # Yield curve
-yields_aligned = pd.DataFrame({'10Y': yield_10y, '2Y': yield_2y}).dropna()
-curr_spread    = yields_aligned['10Y'].iloc[-1] - yields_aligned['2Y'].iloc[-1] if len(yields_aligned) > 0 else 0
-curve_shape    = "Inverted ⚠️" if curr_spread < 0 else "Normal ✓"
+yields_aligned = pd.DataFrame(
+    {'10Y': yield_10y, '2Y': yield_2y}
+).dropna()
+curr_spread = yields_aligned['10Y'].iloc[-1] - \
+              yields_aligned['2Y'].iloc[-1] \
+              if len(yields_aligned) > 0 else 0
+curve_shape = "Inverted ⚠️" if curr_spread < 0 else "Normal ✓"
 
-# Signals
-sig_nifty,  col_nifty  = generate_signal("NIFTY",  nifty_f,  vix_f)
-sig_sp500,  col_sp500  = generate_signal("SP500",  sp500_f,  vix_f)
-sig_gold,   col_gold   = generate_signal("Gold",   gold_f,   vix_f)
-sig_crude,  col_crude  = generate_signal("Crude",  crude_f,  vix_f)
+# Legacy signals (fallback)
+sig_nifty, col_nifty = generate_signal("NIFTY", nifty_f, vix_f)
+sig_sp500, col_sp500 = generate_signal("SP500", sp500_f, vix_f)
+sig_gold,  col_gold  = generate_signal("Gold",  gold_f,  vix_f)
+sig_crude, col_crude = generate_signal("Crude", crude_f, vix_f)
 
 # Sentiment
 overall_sentiment = "N/A"
 sentiment_score   = 0.0
 if not sentiment_df.empty:
     sentiment_score   = sentiment_df['score'].mean()
-    overall_sentiment = "Positive" if sentiment_score > 0.05 else \
-                        "Negative" if sentiment_score < -0.05 else "Neutral"
+    overall_sentiment = "Positive" if sentiment_score > 0.05 \
+                   else "Negative" if sentiment_score < -0.05 \
+                   else "Neutral"
 
-# ════════════════════════════════════════════════════════════════════
+# V3 signals
+nifty_sig, nifty_score, nifty_conf, nifty_stable = \
+    get_v3_signal('NIFTY')
+sp500_sig, sp500_score, sp500_conf, sp500_stable = \
+    get_v3_signal('SP500')
+gold_sig,  gold_score,  gold_conf,  gold_stable  = \
+    get_v3_signal('Gold')
+crude_sig, crude_score, crude_conf, crude_stable = \
+    get_v3_signal('Crude')
+
+# ═════════════════════════════════════════════════════════════
 # HEADER
-# ════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════
+
 st.markdown(f"""
 <div style='background: linear-gradient(135deg, #1F3864, #2E75B6);
      padding: 20px 28px; border-radius: 10px; margin-bottom: 20px;'>
@@ -257,37 +344,46 @@ st.markdown(f"""
     </h1>
     <p style='color: #D6E4F0; margin: 4px 0 0 0; font-size: 14px;'>
         Multi-Asset Signal Framework &nbsp;|&nbsp;
-        {start_date.strftime('%d %b %Y')} → {end_date.strftime('%d %b %Y')} &nbsp;|&nbsp;
+        {start_date.strftime('%d %b %Y')} →
+        {end_date.strftime('%d %b %Y')} &nbsp;|&nbsp;
         Built by Niraj Mutha
     </p>
 </div>
 """, unsafe_allow_html=True)
 
-# ════════════════════════════════════════════════════════════════════
-# LAYER 1 — HEADLINE SIGNALS (60-second test)
-# ════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════
+# LAYER 1 — MARKET INTELLIGENCE SNAPSHOT
+# ═════════════════════════════════════════════════════════════
+
 st.markdown("### 🎯 Layer 1 — Market Intelligence Snapshot")
 st.caption("The 60-second view — understand the full market state at a glance")
 
 col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
-    color_cls = "metric-positive" if regime_label == "Bull Market" else \
-                "metric-negative" if regime_label in ["Bear Market","Crisis"] else \
-                "metric-neutral"
+    color_cls = "metric-positive" \
+        if regime_label == "Bull Market" else \
+        "metric-negative" \
+        if regime_label in ["Bear Market", "Crisis"] else \
+        "metric-neutral"
     st.markdown(f"""
     <div class='metric-card {color_cls}'>
-        <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>Market Regime</div>
-        <div style='font-size:20px; font-weight:bold; color:#1F3864; color:{regime_color};'>{regime_label}</div>
-        <div style='font-size:11px; color:{GRAY};'>VIX: {curr_vix:.1f}</div>
+        <div style='font-size:11px; color:{GRAY};
+             text-transform:uppercase;'>Market Regime</div>
+        <div style='font-size:20px; font-weight:bold;
+             color:{regime_color};'>{regime_label}</div>
+        <div style='font-size:11px; color:{GRAY};'>
+             VIX: {curr_vix:.1f}</div>
     </div>""", unsafe_allow_html=True)
 
 with col2:
     d_nifty = pct_change_label(curr_nifty, prev_nifty)
     st.markdown(f"""
     <div class='metric-card {"metric-positive" if d_nifty >= 0 else "metric-negative"}'>
-        <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>NIFTY 50</div>
-        <div style='font-size:20px; font-weight:bold; color:#1F3864;'>{curr_nifty:,.0f}</div>
+        <div style='font-size:11px; color:{GRAY};
+             text-transform:uppercase;'>NIFTY 50</div>
+        <div style='font-size:20px; font-weight:bold;
+             color:#1F3864;'>{curr_nifty:,.0f}</div>
         <div>{delta_arrow(d_nifty)}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -295,8 +391,10 @@ with col3:
     d_sp = pct_change_label(curr_sp500, prev_sp500)
     st.markdown(f"""
     <div class='metric-card {"metric-positive" if d_sp >= 0 else "metric-negative"}'>
-        <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>S&P 500</div>
-        <div style='font-size:20px; font-weight:bold; color:#1F3864;'>{curr_sp500:,.0f}</div>
+        <div style='font-size:11px; color:{GRAY};
+             text-transform:uppercase;'>S&P 500</div>
+        <div style='font-size:20px; font-weight:bold;
+             color:#1F3864;'>{curr_sp500:,.0f}</div>
         <div>{delta_arrow(d_sp)}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -304,79 +402,126 @@ with col4:
     d_gold = pct_change_label(curr_gold, prev_gold)
     st.markdown(f"""
     <div class='metric-card {"metric-positive" if d_gold >= 0 else "metric-negative"}'>
-        <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>Gold (USD)</div>
-        <div style='font-size:20px; font-weight:bold; color:#1F3864;'>${curr_gold:,.0f}</div>
+        <div style='font-size:11px; color:{GRAY};
+             text-transform:uppercase;'>Gold (USD)</div>
+        <div style='font-size:20px; font-weight:bold;
+             color:#1F3864;'>${curr_gold:,.0f}</div>
         <div>{delta_arrow(d_gold)}</div>
     </div>""", unsafe_allow_html=True)
 
 with col5:
-    sent_color = "metric-positive" if overall_sentiment == "Positive" else \
-                 "metric-negative" if overall_sentiment == "Negative" else \
-                 "metric-neutral"
+    sent_color = "metric-positive" \
+        if overall_sentiment == "Positive" else \
+        "metric-negative" \
+        if overall_sentiment == "Negative" else \
+        "metric-neutral"
     st.markdown(f"""
     <div class='metric-card {sent_color}'>
-        <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>Sentiment</div>
-        <div style='font-size:20px; font-weight:bold; color:#1F3864;'>{overall_sentiment}</div>
-        <div style='font-size:11px; color:{GRAY};'>Score: {sentiment_score:+.3f}</div>
+        <div style='font-size:11px; color:{GRAY};
+             text-transform:uppercase;'>Sentiment</div>
+        <div style='font-size:20px; font-weight:bold;
+             color:#1F3864;'>{overall_sentiment}</div>
+        <div style='font-size:11px; color:{GRAY};'>
+             Score: {sentiment_score:+.3f}</div>
     </div>""", unsafe_allow_html=True)
 
-# Signal row
+# ── Signal row — V3 with confidence ──────────────────────────
 st.markdown("#### 📡 Active Trading Signals")
 sc1, sc2, sc3, sc4, sc5 = st.columns(5)
 
-def signal_badge(label, signal, color):
-    badge_class = f"badge-{'long' if signal=='Long' else 'short' if signal=='Short' else 'neutral'}"
+def signal_badge_v3(label, signal, score, confidence, stable):
+    badge_class = \
+        f"badge-{'long' if signal=='Long' else 'short' if signal=='Short' else 'neutral'}"
+    conf_color = "#1E6B3C" if confidence == 'HIGH' else \
+                 "#C55A11" if confidence == 'MEDIUM' else \
+                 "#595959"
+    stab_icon = "✅" if stable == signal else "⏳"
     return f"""
-    <div style='text-align:center; padding: 10px; background:white;
-         border-radius:8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);'>
-        <div style='font-size:11px; color:{GRAY}; margin-bottom:4px;'>{label}</div>
-        <span class='signal-badge {badge_class}'>{signal}</span>
-    </div>"""
-
-with sc1: st.markdown(signal_badge("NIFTY 50",  sig_nifty, col_nifty),  unsafe_allow_html=True)
-with sc2: st.markdown(signal_badge("S&P 500",   sig_sp500, col_sp500),  unsafe_allow_html=True)
-with sc3: st.markdown(signal_badge("Gold",      sig_gold,  col_gold),   unsafe_allow_html=True)
-with sc4: st.markdown(signal_badge("Crude WTI", sig_crude, col_crude),  unsafe_allow_html=True)
-with sc5: st.markdown(f"""
     <div style='text-align:center; padding:10px; background:white;
          border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);'>
-        <div style='font-size:11px; color:{GRAY}; margin-bottom:4px;'>Yield Curve</div>
+        <div style='font-size:11px; color:{GRAY};
+             margin-bottom:4px;'>{label}</div>
+        <span class='signal-badge {badge_class}'>{signal}</span>
+        <div style='font-size:10px; color:{conf_color};
+             margin-top:4px; font-weight:bold;'>{confidence}</div>
+        <div style='font-size:10px; color:{GRAY};'>
+             {stab_icon} {score:+.2f}</div>
+    </div>"""
+
+with sc1:
+    st.markdown(signal_badge_v3(
+        "NIFTY 50", nifty_sig, nifty_score,
+        nifty_conf, nifty_stable),
+        unsafe_allow_html=True)
+with sc2:
+    st.markdown(signal_badge_v3(
+        "S&P 500", sp500_sig, sp500_score,
+        sp500_conf, sp500_stable),
+        unsafe_allow_html=True)
+with sc3:
+    st.markdown(signal_badge_v3(
+        "Gold", gold_sig, gold_score,
+        gold_conf, gold_stable),
+        unsafe_allow_html=True)
+with sc4:
+    st.markdown(signal_badge_v3(
+        "Crude WTI", crude_sig, crude_score,
+        crude_conf, crude_stable),
+        unsafe_allow_html=True)
+with sc5:
+    st.markdown(f"""
+    <div style='text-align:center; padding:10px; background:white;
+         border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);'>
+        <div style='font-size:11px; color:{GRAY};
+             margin-bottom:4px;'>Yield Curve</div>
         <span class='signal-badge {"badge-short" if "Inverted" in curve_shape else "badge-long"}'>{curve_shape}</span>
     </div>""", unsafe_allow_html=True)
 
 # Dynamic commentary
-vix_pct = (vix_f.rank(pct=True).iloc[-1] * 100) if len(vix_f) > 0 else 50
+vix_pct = (vix_f.rank(pct=True).iloc[-1] * 100) \
+           if len(vix_f) > 0 else 50
 commentary = f"""
-📌 <strong>System Commentary ({end_date.strftime('%d %b %Y')}):</strong>
-Market is in <strong>{regime_label}</strong> regime with VIX at {curr_vix:.1f}
-({vix_pct:.0f}th percentile of selected history).
-Yield curve is <strong>{curve_shape}</strong> (spread: {curr_spread:+.2f}%).
-Sentiment reads <strong>{overall_sentiment}</strong> ({sentiment_score:+.3f}).
-NIFTY signal is <strong>{sig_nifty}</strong> | S&P 500 signal is <strong>{sig_sp500}</strong> |
-Gold signal is <strong>{sig_gold}</strong>.
+📌 <strong>System Commentary
+({end_date.strftime('%d %b %Y')}):</strong>
+Market is in <strong>{regime_label}</strong> regime with VIX at
+{curr_vix:.1f} ({vix_pct:.0f}th percentile of selected history).
+Yield curve is <strong>{curve_shape}</strong>
+(spread: {curr_spread:+.2f}%).
+Sentiment reads <strong>{overall_sentiment}</strong>
+({sentiment_score:+.3f}).
+NIFTY signal is <strong>{nifty_sig}</strong>
+(Confidence: {nifty_conf}) |
+S&P 500 signal is <strong>{sp500_sig}</strong> |
+Gold signal is <strong>{gold_sig}</strong>.
 """
-st.markdown(f"<div class='commentary-box'>{commentary}</div>", unsafe_allow_html=True)
+st.markdown(
+    f"<div class='commentary-box'>{commentary}</div>",
+    unsafe_allow_html=True
+)
 
 st.markdown("---")
 
-# ════════════════════════════════════════════════════════════════════
-# LAYER 2 — INTERACTIVE CHARTS (context)
-# ════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════
+# LAYER 2 — INTERACTIVE ANALYSIS
+# ═════════════════════════════════════════════════════════════
+
 st.markdown("### 📈 Layer 2 — Interactive Analysis")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🌍 Macro", "📊 Volatility", "💱 FX & Bonds", "😐 Sentiment", "📉 Backtest"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "🌍 Macro", "📊 Volatility", "💱 FX & Bonds",
+    "😐 Sentiment", "📉 Backtest",
+    "🔮 Analogs", "📋 Walk-Forward"
+])
 
 # ── TAB 1: MACRO ──────────────────────────────────────────────
 with tab1:
     st.subheader("Cross-Asset Price Performance")
-
-    # Normalise selected markets
     market_map = {
-        "NIFTY 50":   nifty_f,
-        "S&P 500":    sp500_f,
-        "Gold":       gold_f,
-        "Silver":     silver_f,
-        "Crude WTI":  crude_f,
+        "NIFTY 50":  nifty_f,
+        "S&P 500":   sp500_f,
+        "Gold":      gold_f,
+        "Silver":    silver_f,
+        "Crude WTI": crude_f,
     }
     color_map = {
         "NIFTY 50":  BLUE,
@@ -394,27 +539,28 @@ with tab1:
                 s_norm = s / s.iloc[0] * 100
                 fig.add_trace(go.Scatter(
                     x=s_norm.index, y=s_norm.values,
-                    name=market, line=dict(color=color_map[market], width=1.8),
+                    name=market,
+                    line=dict(color=color_map[market], width=1.8),
                     hovertemplate=f"{market}: %{{y:.1f}}<extra></extra>"
                 ))
-
-    fig.add_hline(y=100, line_dash="dash", line_color="gray", line_width=0.8,
+    fig.add_hline(y=100, line_dash="dash",
+                   line_color="gray", line_width=0.8,
                    annotation_text="Start (100)")
     fig.update_layout(
-        title="Indexed Performance (Base = 100 at start of selected period)",
+        title="Indexed Performance (Base = 100)",
         yaxis_title="Indexed Price (Base 100)",
-        xaxis_title="",
-        height=420,
-        template="plotly_white",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        height=420, template="plotly_white",
+        legend=dict(orientation="h", yanchor="bottom",
+                    y=1.02, xanchor="right", x=1),
         hovermode="x unified"
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # Correlation heatmap
     st.subheader("Rolling Correlation Matrix")
-    corr_window = st.slider("Correlation window (days)", 30, 252, 60, key="corr_slider")
-
+    corr_window = st.slider(
+        "Correlation window (days)", 30, 252, 60,
+        key="corr_slider"
+    )
     all_returns = pd.DataFrame({
         'NIFTY':  nifty_f.pct_change(),
         'SP500':  sp500_f.pct_change(),
@@ -422,175 +568,232 @@ with tab1:
         'Silver': silver_f.pct_change(),
         'Crude':  crude_f.pct_change(),
     }).dropna()
-
     corr_matrix = all_returns.tail(corr_window).corr()
-    fig_corr = px.imshow(corr_matrix, color_continuous_scale='RdYlGn',
-                          zmin=-1, zmax=1, text_auto='.2f',
-                          title=f"Correlation Matrix — Last {corr_window} Trading Days")
+    fig_corr = px.imshow(
+        corr_matrix, color_continuous_scale='RdYlGn',
+        zmin=-1, zmax=1, text_auto='.2f',
+        title=f"Correlation Matrix — Last {corr_window} Days"
+    )
     fig_corr.update_layout(height=380, template="plotly_white")
     st.plotly_chart(fig_corr, use_container_width=True)
 
 # ── TAB 2: VOLATILITY ─────────────────────────────────────────
 with tab2:
     st.subheader("VIX & Volatility Regime")
-
-    fig_vix = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                             subplot_titles=("VIX — Fear Index", "VIX vs India VIX"),
-                             vertical_spacing=0.12)
-
-    fig_vix.add_trace(go.Scatter(x=vix_f.index, y=vix_f.values, name='VIX US',
-                                  line=dict(color=RED, width=1.5)), row=1, col=1)
-    fig_vix.add_hline(y=vix_caution, line_dash="dash", line_color="orange",
-                       annotation_text=f"Caution ({vix_caution})", row=1, col=1)
-    fig_vix.add_hline(y=vix_crisis,  line_dash="dash", line_color=RED,
-                       annotation_text=f"Crisis ({vix_crisis})", row=1, col=1)
-
+    fig_vix = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        subplot_titles=("VIX — Fear Index", "VIX vs India VIX"),
+        vertical_spacing=0.12
+    )
+    fig_vix.add_trace(go.Scatter(
+        x=vix_f.index, y=vix_f.values,
+        name='VIX US', line=dict(color=RED, width=1.5)
+    ), row=1, col=1)
+    fig_vix.add_hline(
+        y=vix_caution, line_dash="dash",
+        line_color="orange",
+        annotation_text=f"Caution ({vix_caution})",
+        row=1, col=1
+    )
+    fig_vix.add_hline(
+        y=vix_crisis, line_dash="dash",
+        line_color=RED,
+        annotation_text=f"Crisis ({vix_crisis})",
+        row=1, col=1
+    )
     vix_mean = vix_f.mean()
-    fig_vix.add_hline(y=vix_mean, line_dash="dot", line_color=GRAY,
-                       annotation_text=f"Mean ({vix_mean:.1f})", row=1, col=1)
-
+    fig_vix.add_hline(
+        y=vix_mean, line_dash="dot", line_color=GRAY,
+        annotation_text=f"Mean ({vix_mean:.1f})",
+        row=1, col=1
+    )
     vix_india_f = filter_series(vix_india)
-    fig_vix.add_trace(go.Scatter(x=vix_india_f.index, y=vix_india_f.values,
-                                  name='India VIX', line=dict(color=BLUE, width=1.5)), row=2, col=1)
-    fig_vix.add_trace(go.Scatter(x=vix_f.index, y=vix_f.values, name='US VIX',
-                                  line=dict(color=RED, width=1.2, dash='dot')), row=2, col=1)
-
-    fig_vix.update_layout(height=520, template="plotly_white", hovermode="x unified")
+    fig_vix.add_trace(go.Scatter(
+        x=vix_india_f.index, y=vix_india_f.values,
+        name='India VIX', line=dict(color=BLUE, width=1.5)
+    ), row=2, col=1)
+    fig_vix.add_trace(go.Scatter(
+        x=vix_f.index, y=vix_f.values,
+        name='US VIX', line=dict(color=RED, width=1.2, dash='dot')
+    ), row=2, col=1)
+    fig_vix.update_layout(
+        height=520, template="plotly_white",
+        hovermode="x unified"
+    )
     st.plotly_chart(fig_vix, use_container_width=True)
 
-    # VIX stats
     v1, v2, v3, v4 = st.columns(4)
-    v1.metric("Current VIX",      f"{curr_vix:.1f}")
-    v2.metric("VIX Mean",         f"{vix_f.mean():.1f}")
-    v3.metric("VIX Max (period)", f"{vix_f.max():.1f}")
-    v4.metric("Days above crisis",f"{(vix_f > vix_crisis).sum()}")
+    v1.metric("Current VIX",       f"{curr_vix:.1f}")
+    v2.metric("VIX Mean",          f"{vix_f.mean():.1f}")
+    v3.metric("VIX Max (period)",  f"{vix_f.max():.1f}")
+    v4.metric("Days above crisis", f"{(vix_f > vix_crisis).sum()}")
 
-    # Commentary
     nifty_ret_aligned = nifty_f.pct_change()
-    vix_aligned       = vix_f.reindex(nifty_ret_aligned.index).ffill()
-    hist_ret_high_vix = nifty_ret_aligned[vix_aligned > vix_crisis].mean() * 100
-    hist_ret_low_vix  = nifty_ret_aligned[vix_aligned < vix_caution].mean() * 100
+    vix_aligned       = vix_f.reindex(
+        nifty_ret_aligned.index).ffill()
+    hist_ret_high_vix = nifty_ret_aligned[
+        vix_aligned > vix_crisis].mean() * 100
+    hist_ret_low_vix  = nifty_ret_aligned[
+        vix_aligned < vix_caution].mean() * 100
     st.markdown(f"""<div class='commentary-box'>
     📌 <strong>Volatility Commentary:</strong>
     When VIX exceeds {vix_crisis} (crisis), NIFTY averages
-    <strong>{hist_ret_high_vix:.3f}%</strong> next day (sell pressure).
+    <strong>{hist_ret_high_vix:.3f}%</strong> next day.
     When VIX is below {vix_caution} (calm), NIFTY averages
-    <strong>{hist_ret_low_vix:.3f}%</strong> next day (drift higher).
-    Current VIX is at the <strong>{vix_pct:.0f}th percentile</strong> of history.
+    <strong>{hist_ret_low_vix:.3f}%</strong> next day.
+    Current VIX is at the
+    <strong>{vix_pct:.0f}th percentile</strong> of history.
     </div>""", unsafe_allow_html=True)
 
 # ── TAB 3: FX & BONDS ─────────────────────────────────────────
 with tab3:
     st.subheader("Yield Curve & Currency Analysis")
-
-    # Yield curve
     yields_f = pd.DataFrame({
         '10Y': filter_series(yield_10y),
         '2Y':  filter_series(yield_2y),
     }).dropna()
     yields_f['Spread'] = yields_f['10Y'] - yields_f['2Y']
 
-    fig_yc = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                            subplot_titles=("Treasury Yields", "Yield Spread (10Y − 2Y)"),
-                            vertical_spacing=0.12)
-    fig_yc.add_trace(go.Scatter(x=yields_f.index, y=yields_f['10Y'],
-                                 name='10Y', line=dict(color=BLUE, width=1.5)), row=1, col=1)
-    fig_yc.add_trace(go.Scatter(x=yields_f.index, y=yields_f['2Y'],
-                                 name='2Y', line=dict(color=ORANGE, width=1.5)), row=1, col=1)
-    fig_yc.add_trace(go.Scatter(x=yields_f.index, y=yields_f['Spread'],
-                                 name='Spread', line=dict(color=MID_BLUE, width=1.5),
-                                 fill='tozeroy',
-                                 fillcolor='rgba(30,107,60,0.15)'), row=2, col=1)
-    fig_yc.add_hline(y=0, line_dash="dash", line_color=RED,
-                      annotation_text="Inversion level", row=2, col=1)
-    fig_yc.update_layout(height=480, template="plotly_white", hovermode="x unified")
+    fig_yc = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        subplot_titles=("Treasury Yields",
+                        "Yield Spread (10Y − 2Y)"),
+        vertical_spacing=0.12
+    )
+    fig_yc.add_trace(go.Scatter(
+        x=yields_f.index, y=yields_f['10Y'],
+        name='10Y', line=dict(color=BLUE, width=1.5)
+    ), row=1, col=1)
+    fig_yc.add_trace(go.Scatter(
+        x=yields_f.index, y=yields_f['2Y'],
+        name='2Y', line=dict(color=ORANGE, width=1.5)
+    ), row=1, col=1)
+    fig_yc.add_trace(go.Scatter(
+        x=yields_f.index, y=yields_f['Spread'],
+        name='Spread', line=dict(color=MID_BLUE, width=1.5),
+        fill='tozeroy', fillcolor='rgba(30,107,60,0.15)'
+    ), row=2, col=1)
+    fig_yc.add_hline(
+        y=0, line_dash="dash", line_color=RED,
+        annotation_text="Inversion level", row=2, col=1
+    )
+    fig_yc.update_layout(
+        height=480, template="plotly_white",
+        hovermode="x unified"
+    )
     st.plotly_chart(fig_yc, use_container_width=True)
 
-    # USD/INR
     st.subheader("USD/INR Exchange Rate")
     fig_inr = go.Figure()
-    fig_inr.add_trace(go.Scatter(x=usd_inr_f.index, y=usd_inr_f.values,
-                                  name='USD/INR', line=dict(color=RED, width=1.5),
-                                  fill='tozeroy', fillcolor='rgba(192,0,0,0.05)'))
+    fig_inr.add_trace(go.Scatter(
+        x=usd_inr_f.index, y=usd_inr_f.values,
+        name='USD/INR', line=dict(color=RED, width=1.5),
+        fill='tozeroy', fillcolor='rgba(192,0,0,0.05)'
+    ))
     inr_mean = usd_inr_f.mean()
-    fig_inr.add_hline(y=inr_mean, line_dash="dot", line_color=GRAY,
-                       annotation_text=f"Mean ({inr_mean:.1f})")
-    fig_inr.update_layout(height=320, template="plotly_white",
-                           yaxis_title="USD/INR Rate",
-                           title="Rising = Rupee Weakening")
+    fig_inr.add_hline(
+        y=inr_mean, line_dash="dot", line_color=GRAY,
+        annotation_text=f"Mean ({inr_mean:.1f})"
+    )
+    fig_inr.update_layout(
+        height=320, template="plotly_white",
+        yaxis_title="USD/INR Rate",
+        title="Rising = Rupee Weakening"
+    )
     st.plotly_chart(fig_inr, use_container_width=True)
 
-    # INR depreciation stat
     if len(usd_inr_f) > 1:
-        depr = pct_change_label(usd_inr_f.iloc[-1], usd_inr_f.iloc[0])
+        depr = pct_change_label(
+            usd_inr_f.iloc[-1], usd_inr_f.iloc[0])
         st.markdown(f"""<div class='commentary-box'>
         📌 <strong>FX Commentary:</strong>
-        USD/INR moved from <strong>{usd_inr_f.iloc[0]:.1f}</strong> to
-        <strong>{usd_inr_f.iloc[-1]:.1f}</strong> over the selected period
+        USD/INR moved from
+        <strong>{usd_inr_f.iloc[0]:.1f}</strong> to
+        <strong>{usd_inr_f.iloc[-1]:.1f}</strong>
         ({depr:+.1f}% Rupee depreciation).
-        Yield curve is currently <strong>{curve_shape}</strong> with a
-        {curr_spread:+.2f}% spread — inversions historically precede recessions
-        by 12–18 months.
+        Yield curve is currently <strong>{curve_shape}</strong>
+        with a {curr_spread:+.2f}% spread.
         </div>""", unsafe_allow_html=True)
 
 # ── TAB 4: SENTIMENT ──────────────────────────────────────────
 with tab4:
-    st.subheader("Live News Sentiment Analysis")
-
+    st.subheader("Live News Sentiment Analysis (FinBERT)")
     if sentiment_df.empty:
-        st.warning("No sentiment data found. Run 09_sentiment_engine.py first.")
+        st.warning(
+            "No sentiment data. Run 15_finbert_sentiment.py first."
+        )
     else:
         s1, s2, s3 = st.columns(3)
-        s1.metric("Overall Score",       f"{sentiment_df['score'].mean():+.4f}")
-        s2.metric("Total Headlines",     f"{len(sentiment_df)}")
-        s3.metric("Positive %",          f"{(sentiment_df['sentiment']=='Positive').mean()*100:.1f}%")
+        s1.metric("Overall Score",
+                   f"{sentiment_df['score'].mean():+.4f}")
+        s2.metric("Total Headlines", f"{len(sentiment_df)}")
+        s3.metric("Positive %",
+                   f"{(sentiment_df['sentiment']=='Positive').mean()*100:.1f}%")
 
-        # Pie chart
         sent_counts = sentiment_df['sentiment'].value_counts()
-        fig_pie = px.pie(values=sent_counts.values, names=sent_counts.index,
-                          color=sent_counts.index,
-                          color_discrete_map={'Positive': GREEN, 'Neutral': MID_BLUE, 'Negative': RED},
-                          title="Sentiment Distribution")
+        fig_pie = px.pie(
+            values=sent_counts.values,
+            names=sent_counts.index,
+            color=sent_counts.index,
+            color_discrete_map={
+                'Positive': GREEN,
+                'Neutral':  MID_BLUE,
+                'Negative': RED
+            },
+            title="Sentiment Distribution"
+        )
         fig_pie.update_layout(height=350)
         st.plotly_chart(fig_pie, use_container_width=True)
 
-        # Sentiment by market bar chart
         if 'markets' in sentiment_df.columns:
             market_sent = {}
             for mkt in ['NIFTY','SP500','Gold','Crude','General']:
-                mask = sentiment_df['markets'].str.contains(mkt, na=False)
+                mask = sentiment_df['markets'].str.contains(
+                    mkt, na=False)
                 if mask.sum() > 0:
-                    market_sent[mkt] = sentiment_df[mask]['score'].mean()
-
+                    market_sent[mkt] = \
+                        sentiment_df[mask]['score'].mean()
             if market_sent:
                 fig_mkt = go.Figure(go.Bar(
                     x=list(market_sent.keys()),
                     y=list(market_sent.values()),
-                    marker_color=[GREEN if v >= 0.05 else RED if v <= -0.05
-                                   else ORANGE for v in market_sent.values()],
+                    marker_color=[
+                        GREEN  if v >= 0.05 else
+                        RED    if v <= -0.05 else
+                        ORANGE for v in market_sent.values()
+                    ],
                 ))
-                fig_mkt.add_hline(y=0.05,  line_dash="dot", line_color=GREEN,
-                                   annotation_text="Positive threshold")
-                fig_mkt.add_hline(y=-0.05, line_dash="dot", line_color=RED,
-                                   annotation_text="Negative threshold")
-                fig_mkt.update_layout(title="Sentiment Score by Market",
-                                       yaxis_title="Avg Score",
-                                       template="plotly_white", height=350)
+                fig_mkt.add_hline(
+                    y=0.05, line_dash="dot", line_color=GREEN,
+                    annotation_text="Positive threshold"
+                )
+                fig_mkt.add_hline(
+                    y=-0.05, line_dash="dot", line_color=RED,
+                    annotation_text="Negative threshold"
+                )
+                fig_mkt.update_layout(
+                    title="Sentiment Score by Market",
+                    yaxis_title="Avg Score",
+                    template="plotly_white", height=350
+                )
                 st.plotly_chart(fig_mkt, use_container_width=True)
 
-        # Top headlines table
         with st.expander("📰 View All Headlines"):
             st.dataframe(
-                sentiment_df[['headline','score','sentiment','markets','source']]
+                sentiment_df[['headline','score',
+                               'sentiment','markets','source']]
                 .sort_values('score', ascending=False),
                 use_container_width=True
             )
+
 # ── TAB 5: BACKTEST ───────────────────────────────────────────
 with tab5:
     st.subheader("Signal Strategy vs Buy-and-Hold Backtest")
-    st.caption("15 years of real data | Transaction cost: 0.1% per trade | No leverage")
+    st.caption(
+        "16 years of real data | "
+        "Transaction cost: 0.1% per trade | No leverage"
+    )
 
-    # ── Load signals from database ────────────────────────────
     @st.cache_data(ttl=300)
     def load_signals():
         conn = sqlite3.connect(DB_PATH)
@@ -607,15 +810,17 @@ with tab5:
     signals = load_signals()
 
     if signals.empty:
-        st.warning("No signal data found. Run 12_signal_engine.py first.")
+        st.warning(
+            "No signal data. Run 12_signal_engine.py first."
+        )
     else:
-        # ── Backtest engine ───────────────────────────────────
         def run_backtest_dash(price, signal_scores,
                                transaction_cost=0.001,
                                threshold=0.15):
-            sig      = signal_scores.reindex(price.index).ffill().bfill()
-            daily_ret= price.pct_change().fillna(0)
-            position = pd.Series(0.0, index=price.index)
+            sig       = signal_scores.reindex(
+                price.index).ffill().bfill()
+            daily_ret = price.pct_change().fillna(0)
+            position  = pd.Series(0.0, index=price.index)
             position[sig >= threshold]  = 1.0
             position[sig <= -threshold] = 0.0
             pos_change = position.diff().abs().fillna(0)
@@ -626,14 +831,18 @@ with tab5:
             bnh_eq     = (1 + bnh_ret).cumprod()   * 100
 
             def metrics(ret, eq):
-                n_years  = len(ret) / 252
-                total    = eq.iloc[-1] / 100
-                cagr     = (total ** (1/n_years) - 1) * 100 if n_years > 0 and total > 0 else 0
-                sharpe   = (ret.mean() / (ret.std() + 1e-10)) * np.sqrt(252)
+                n_years = len(ret) / 252
+                total   = eq.iloc[-1] / 100
+                cagr    = (total**(1/n_years)-1)*100 \
+                           if n_years > 0 and total > 0 else 0
+                sharpe  = (ret.mean() /
+                           (ret.std()+1e-10)) * np.sqrt(252)
                 roll_max = eq.cummax()
-                maxdd    = ((eq - roll_max) / roll_max).min() * 100
-                sortino  = (ret.mean() / (ret[ret<0].std() + 1e-10)) * np.sqrt(252)
-                winrate  = (ret > 0).sum() / (ret != 0).sum() * 100
+                maxdd    = ((eq-roll_max)/roll_max).min()*100
+                sortino  = (ret.mean() /
+                            (ret[ret<0].std()+1e-10)) * np.sqrt(252)
+                winrate  = (ret > 0).sum() / \
+                            (ret != 0).sum() * 100
                 return {
                     'CAGR': cagr, 'Sharpe': sharpe,
                     'MaxDD': maxdd, 'Sortino': sortino,
@@ -652,13 +861,11 @@ with tab5:
                                strat_eq.cummax() * 100),
             }
 
-        # ── Asset selector ────────────────────────────────────
         bt_asset = st.selectbox(
             "Select asset to backtest",
-            ["NIFTY 50", "S&P 500", "Gold", "Silver", "Crude WTI"],
+            ["NIFTY 50","S&P 500","Gold","Silver","Crude WTI"],
             key="bt_asset"
         )
-
         asset_map = {
             "NIFTY 50":  (nifty,  'NIFTY_score'),
             "S&P 500":   (sp500,  'SP500_score'),
@@ -668,69 +875,49 @@ with tab5:
         }
         color_map_bt = {
             "NIFTY 50": BLUE, "S&P 500": MID_BLUE,
-            "Gold": ORANGE, "Silver": "#7030A0", "Crude WTI": "#1E6B3C",
+            "Gold": ORANGE, "Silver": "#7030A0",
+            "Crude WTI": "#1E6B3C",
         }
 
         price_series, score_col = asset_map[bt_asset]
         color_bt = color_map_bt[bt_asset]
 
         if score_col in signals.columns:
-            bt = run_backtest_dash(price_series, signals[score_col])
-
-            # ── Metrics row ───────────────────────────────────
+            bt = run_backtest_dash(price_series,
+                                    signals[score_col])
             st.markdown("#### Performance Metrics")
             m1, m2, m3, m4, m5 = st.columns(5)
-
             sm = bt['strat_m']
             bm = bt['bnh_m']
+            m1.metric("Strategy CAGR",
+                       f"{sm['CAGR']:+.1f}%",
+                       f"{sm['CAGR']-bm['CAGR']:+.1f}% vs B&H")
+            m2.metric("Sharpe Ratio",
+                       f"{sm['Sharpe']:.2f}",
+                       f"{sm['Sharpe']-bm['Sharpe']:+.2f} vs B&H")
+            m3.metric("Max Drawdown",
+                       f"{sm['MaxDD']:.1f}%",
+                       f"{sm['MaxDD']-bm['MaxDD']:+.1f}% vs B&H",
+                       delta_color="inverse")
+            m4.metric("Sortino Ratio",
+                       f"{sm['Sortino']:.2f}",
+                       f"{sm['Sortino']-bm['Sortino']:+.2f} vs B&H")
+            m5.metric("Win Rate", f"{sm['WinRate']:.1f}%", None)
 
-            m1.metric(
-                "Strategy CAGR",
-                f"{sm['CAGR']:+.1f}%",
-                f"{sm['CAGR']-bm['CAGR']:+.1f}% vs B&H"
-            )
-            m2.metric(
-                "Sharpe Ratio",
-                f"{sm['Sharpe']:.2f}",
-                f"{sm['Sharpe']-bm['Sharpe']:+.2f} vs B&H"
-            )
-            m3.metric(
-                "Max Drawdown",
-                f"{sm['MaxDD']:.1f}%",
-                f"{sm['MaxDD']-bm['MaxDD']:+.1f}% vs B&H",
-                delta_color="inverse"
-            )
-            m4.metric(
-                "Sortino Ratio",
-                f"{sm['Sortino']:.2f}",
-                f"{sm['Sortino']-bm['Sortino']:+.2f} vs B&H"
-            )
-            m5.metric(
-                "Win Rate",
-                f"{sm['WinRate']:.1f}%",
-                None
-            )
-
-            # ── Equity curve ──────────────────────────────────
             st.markdown("#### Equity Curve")
-
             fig_eq = go.Figure()
             fig_eq.add_trace(go.Scatter(
-                x=bt['strat_eq'].index,
-                y=bt['strat_eq'].values,
-                name=f'Signal Strategy',
+                x=bt['strat_eq'].index, y=bt['strat_eq'].values,
+                name='Signal Strategy',
                 line=dict(color=color_bt, width=2),
                 hovertemplate='Strategy: %{y:.1f}<extra></extra>'
             ))
             fig_eq.add_trace(go.Scatter(
-                x=bt['bnh_eq'].index,
-                y=bt['bnh_eq'].values,
+                x=bt['bnh_eq'].index, y=bt['bnh_eq'].values,
                 name='Buy & Hold',
                 line=dict(color='gray', width=1.5, dash='dash'),
                 hovertemplate='B&H: %{y:.1f}<extra></extra>'
             ))
-
-            # Shade outperformance
             bnh_r = bt['bnh_eq'].reindex(bt['strat_eq'].index)
             fig_eq.add_trace(go.Scatter(
                 x=bt['strat_eq'].index.tolist() +
@@ -740,125 +927,110 @@ with tab5:
                 fill='toself',
                 fillcolor='rgba(30,107,60,0.08)',
                 line=dict(color='rgba(255,255,255,0)'),
-                name='Outperformance',
-                showlegend=True
+                name='Outperformance', showlegend=True
             ))
-
             fig_eq.add_hline(y=100, line_dash="dot",
                               line_color="gray", line_width=0.8,
                               annotation_text="Starting value")
             fig_eq.update_layout(
-                height=420,
-                template="plotly_white",
+                height=420, template="plotly_white",
                 yaxis_title="Portfolio Value (Base 100)",
                 hovermode="x unified",
-                legend=dict(orientation="h",
-                             yanchor="bottom", y=1.02,
-                             xanchor="right", x=1)
+                legend=dict(orientation="h", yanchor="bottom",
+                             y=1.02, xanchor="right", x=1)
             )
             st.plotly_chart(fig_eq, use_container_width=True)
 
-            # ── Drawdown chart ────────────────────────────────
             st.markdown("#### Drawdown Analysis")
-
             bnh_dd = ((bt['bnh_eq'] - bt['bnh_eq'].cummax()) /
                        bt['bnh_eq'].cummax() * 100)
-
             fig_dd = go.Figure()
             fig_dd.add_trace(go.Scatter(
-                x=bt['drawdown'].index,
-                y=bt['drawdown'].values,
-                fill='tozeroy',
-                fillcolor=f'rgba(30,107,60,0.3)',
+                x=bt['drawdown'].index, y=bt['drawdown'].values,
+                fill='tozeroy', fillcolor='rgba(30,107,60,0.3)',
                 line=dict(color=color_bt, width=1),
                 name='Strategy Drawdown'
             ))
             fig_dd.add_trace(go.Scatter(
-                x=bnh_dd.index,
-                y=bnh_dd.values,
+                x=bnh_dd.index, y=bnh_dd.values,
                 line=dict(color='gray', width=1, dash='dash'),
                 name='B&H Drawdown'
             ))
             fig_dd.update_layout(
-                height=300,
-                template="plotly_white",
+                height=300, template="plotly_white",
                 yaxis_title="Drawdown (%)",
                 hovermode="x unified"
             )
             st.plotly_chart(fig_dd, use_container_width=True)
 
-            # ── Position chart ────────────────────────────────
             st.markdown("#### Signal Position Over Time")
-
             fig_pos = go.Figure()
             fig_pos.add_trace(go.Scatter(
-                x=bt['position'].index,
-                y=bt['position'].values,
-                fill='tozeroy',
-                fillcolor='rgba(30,107,60,0.2)',
+                x=bt['position'].index, y=bt['position'].values,
+                fill='tozeroy', fillcolor='rgba(30,107,60,0.2)',
                 line=dict(color=color_bt, width=0.8),
                 name='Position (1=Long, 0=Cash)'
             ))
             fig_pos.update_layout(
-                height=200,
-                template="plotly_white",
+                height=200, template="plotly_white",
                 yaxis_title="Position",
-                yaxis=dict(tickvals=[0, 1],
-                            ticktext=['Cash', 'Long']),
+                yaxis=dict(tickvals=[0,1],
+                            ticktext=['Cash','Long']),
                 hovermode="x unified"
             )
             st.plotly_chart(fig_pos, use_container_width=True)
 
-            # ── Commentary ────────────────────────────────────
-            beats = sm['CAGR'] > bm['CAGR']
-            dd_saved = sm['MaxDD'] - bm['MaxDD']
+            dd_saved      = sm['MaxDD'] - bm['MaxDD']
             sharpe_better = sm['Sharpe'] > bm['Sharpe']
-
             st.markdown(f"""<div class='commentary-box'>
             📌 <strong>Backtest Commentary — {bt_asset}:</strong>
-            The signal strategy achieved a CAGR of <strong>{sm['CAGR']:+.1f}%</strong>
-            vs <strong>{bm['CAGR']:+.1f}%</strong> for buy-and-hold.
-            Sharpe ratio: <strong>{sm['Sharpe']:.2f}</strong>
-            vs <strong>{bm['Sharpe']:.2f}</strong> for B&H
-            ({'✅ better' if sharpe_better else '⚠️ lower'} risk-adjusted returns).
-            Maximum drawdown was <strong>{sm['MaxDD']:.1f}%</strong>
-            vs <strong>{bm['MaxDD']:.1f}%</strong> for B&H —
-            the strategy saved <strong>{abs(dd_saved):.1f} percentage points</strong>
-            of drawdown by moving to cash during bad regimes.
+            Strategy CAGR <strong>{sm['CAGR']:+.1f}%</strong>
+            vs <strong>{bm['CAGR']:+.1f}%</strong> B&H.
+            Sharpe: <strong>{sm['Sharpe']:.2f}</strong>
+            vs <strong>{bm['Sharpe']:.2f}</strong>
+            ({'✅ better' if sharpe_better else '⚠️ lower'}).
+            Max drawdown <strong>{sm['MaxDD']:.1f}%</strong>
+            vs <strong>{bm['MaxDD']:.1f}%</strong> B&H —
+            saved <strong>{abs(dd_saved):.1f}pp</strong>.
             </div>""", unsafe_allow_html=True)
 
-        else:
-            st.warning(f"Signal scores not found for {bt_asset}. "
-                        f"Run 12_signal_engine.py first.")
-
-        # ── Combined portfolio summary ────────────────────────
         st.markdown("---")
-        st.markdown("#### Combined Portfolio — All 5 Assets Equal Weight")
-
+        st.markdown(
+            "#### Combined Portfolio — All 5 Assets Equal Weight"
+        )
         try:
             all_strat_rets = []
             all_bnh_rets   = []
-
-            for asset_name, (price_s, score_c) in asset_map.items():
+            for asset_name, (price_s, score_c) in \
+                    asset_map.items():
                 if score_c in signals.columns:
-                    bt_temp = run_backtest_dash(price_s, signals[score_c])
+                    bt_temp = run_backtest_dash(
+                        price_s, signals[score_c])
                     all_strat_rets.append(bt_temp['strat_ret'])
                     all_bnh_rets.append(bt_temp['bnh_ret'])
 
             if all_strat_rets:
-                port_ret  = pd.concat(all_strat_rets, axis=1).dropna().mean(axis=1)
-                port_eq   = (1 + port_ret).cumprod() * 100
-                bnh_port  = pd.concat(all_bnh_rets,   axis=1).dropna().mean(axis=1)
+                port_ret = pd.concat(
+                    all_strat_rets, axis=1).dropna().mean(axis=1)
+                port_eq  = (1 + port_ret).cumprod() * 100
+                bnh_port = pd.concat(
+                    all_bnh_rets, axis=1).dropna().mean(axis=1)
                 bnh_port_eq = (1 + bnh_port).cumprod() * 100
 
-                n_years    = len(port_ret) / 252
-                port_cagr  = ((port_eq.iloc[-1]/100)**(1/n_years)-1)*100
-                port_sharpe= (port_ret.mean()/(port_ret.std()+1e-10))*np.sqrt(252)
-                port_dd    = ((port_eq-port_eq.cummax())/port_eq.cummax()*100).min()
-                bnh_cagr   = ((bnh_port_eq.iloc[-1]/100)**(1/n_years)-1)*100
-                bnh_sharpe = (bnh_port.mean()/(bnh_port.std()+1e-10))*np.sqrt(252)
-                bnh_dd     = ((bnh_port_eq-bnh_port_eq.cummax())/
-                               bnh_port_eq.cummax()*100).min()
+                n_years     = len(port_ret) / 252
+                port_cagr   = ((port_eq.iloc[-1]/100)**(
+                    1/n_years)-1)*100
+                port_sharpe = (port_ret.mean() /
+                    (port_ret.std()+1e-10)) * np.sqrt(252)
+                port_dd     = ((port_eq - port_eq.cummax()) /
+                    port_eq.cummax() * 100).min()
+                bnh_cagr    = ((bnh_port_eq.iloc[-1]/100)**(
+                    1/n_years)-1)*100
+                bnh_sharpe  = (bnh_port.mean() /
+                    (bnh_port.std()+1e-10)) * np.sqrt(252)
+                bnh_dd      = ((bnh_port_eq -
+                    bnh_port_eq.cummax()) /
+                    bnh_port_eq.cummax() * 100).min()
 
                 p1, p2, p3, p4 = st.columns(4)
                 p1.metric("Portfolio CAGR",
@@ -872,73 +1044,328 @@ with tab5:
                            f"{port_dd-bnh_dd:+.1f}% vs B&H",
                            delta_color="inverse")
                 p4.metric("B&H Sharpe",
-                           f"{bnh_sharpe:.2f}",
-                           None)
+                           f"{bnh_sharpe:.2f}", None)
 
                 fig_port = go.Figure()
                 fig_port.add_trace(go.Scatter(
                     x=port_eq.index, y=port_eq.values,
-                    name=f'Signal Portfolio (Sharpe: {port_sharpe:.2f})',
+                    name=f'Signal Portfolio '
+                          f'(Sharpe: {port_sharpe:.2f})',
                     line=dict(color=BLUE, width=2)
                 ))
                 fig_port.add_trace(go.Scatter(
                     x=bnh_port_eq.index, y=bnh_port_eq.values,
-                    name=f'B&H Portfolio (Sharpe: {bnh_sharpe:.2f})',
-                    line=dict(color='gray', width=1.5, dash='dash')
+                    name=f'B&H Portfolio '
+                          f'(Sharpe: {bnh_sharpe:.2f})',
+                    line=dict(color='gray', width=1.5,
+                               dash='dash')
                 ))
-                fig_port.add_hline(y=100, line_dash="dot",
-                                    line_color="gray", line_width=0.8)
+                fig_port.add_hline(
+                    y=100, line_dash="dot",
+                    line_color="gray", line_width=0.8
+                )
                 fig_port.update_layout(
-                    height=380,
-                    template="plotly_white",
+                    height=380, template="plotly_white",
                     yaxis_title="Portfolio Value (Base 100)",
                     hovermode="x unified",
-                    title=f"Combined Portfolio: Sharpe {port_sharpe:.2f} "
+                    title=f"Combined Portfolio: "
+                           f"Sharpe {port_sharpe:.2f} "
                            f"vs B&H {bnh_sharpe:.2f}"
                 )
-                st.plotly_chart(fig_port, use_container_width=True)
+                st.plotly_chart(
+                    fig_port, use_container_width=True)
 
                 st.markdown(f"""<div class='commentary-box'>
                 📌 <strong>Portfolio Summary:</strong>
-                The combined equal-weight signal portfolio achieved a Sharpe ratio of
-                <strong>{port_sharpe:.2f}</strong> vs <strong>{bnh_sharpe:.2f}</strong>
-                for buy-and-hold — a <strong>{port_sharpe/bnh_sharpe:.1f}x</strong>
-                improvement in risk-adjusted returns.
+                Combined Sharpe
+                <strong>{port_sharpe:.2f}</strong> vs
+                <strong>{bnh_sharpe:.2f}</strong> B&H —
+                <strong>{port_sharpe/bnh_sharpe:.1f}x</strong>
+                improvement.
                 CAGR: <strong>{port_cagr:+.1f}%</strong> vs
                 <strong>{bnh_cagr:+.1f}%</strong> B&H.
-                Maximum drawdown: <strong>{port_dd:.1f}%</strong> vs
+                Max DD: <strong>{port_dd:.1f}%</strong> vs
                 <strong>{bnh_dd:.1f}%</strong> B&H.
                 </div>""", unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"Portfolio calculation error: {e}")
-            
+
+# ── TAB 6: HISTORICAL ANALOGS ─────────────────────────────────
+with tab6:
+    st.subheader("Historical Analog Engine")
+    st.caption(
+        "Current conditions matched against 16 years of history"
+    )
+
+    if analog_dates.empty or analog_outcomes.empty:
+        st.warning(
+            "No analog data. Run 17_historical_analog.py first."
+        )
+    else:
+        st.markdown("#### 📅 Most Similar Historical Periods")
+        st.caption(
+            "Periods where market conditions most closely "
+            "resembled today"
+        )
+
+        cols = st.columns(len(analog_dates))
+        for i, (_, row) in enumerate(analog_dates.iterrows()):
+            with cols[i]:
+                sim  = float(row['similarity']) * 100
+                date = pd.Timestamp(row['analog_date'])
+                st.markdown(f"""
+                <div class='metric-card metric-neutral'>
+                    <div style='font-size:11px; color:{GRAY};
+                         text-transform:uppercase;'>
+                         Analog {i+1}</div>
+                    <div style='font-size:16px;
+                         font-weight:bold; color:#1F3864;'>
+                         {date.strftime('%b %Y')}</div>
+                    <div style='font-size:12px; color:{GRAY};'>
+                         Similarity: {sim:.1f}%</div>
+                </div>""", unsafe_allow_html=True)
+
+        st.markdown("#### 📊 Forward Return Expectations")
+        st.caption(
+            "What typically happened after similar conditions"
+        )
+
+        assets_list = ['NIFTY', 'SP500', 'Gold', 'Silver', 'Crude']
+        horizons    = [10, 30, 60]
+
+        for horizon in horizons:
+            st.markdown(f"**{horizon}-Day Outlook:**")
+            h_data = analog_outcomes[
+                analog_outcomes['forward_days'] == horizon
+            ]
+            if h_data.empty:
+                continue
+
+            cols = st.columns(len(assets_list))
+            for i, asset in enumerate(assets_list):
+                row = h_data[h_data['asset'] == asset]
+                if row.empty:
+                    continue
+                row    = row.iloc[0]
+                prob   = float(row['prob_positive'])
+                median = float(row['median_return'])
+
+                if prob >= 60:
+                    color_cls = "metric-positive"
+                    arrow = "↑"
+                elif prob <= 40:
+                    color_cls = "metric-negative"
+                    arrow = "↓"
+                else:
+                    color_cls = "metric-neutral"
+                    arrow = "→"
+
+                with cols[i]:
+                    st.markdown(f"""
+                    <div class='metric-card {color_cls}'>
+                        <div style='font-size:11px; color:{GRAY};
+                             text-transform:uppercase;'>
+                             {asset}</div>
+                        <div style='font-size:18px;
+                             font-weight:bold; color:#1F3864;'>
+                             {arrow} {prob:.0f}%</div>
+                        <div style='font-size:11px; color:{GRAY};'>
+                             Median: {median:+.1f}%</div>
+                        <div style='font-size:10px; color:{GRAY};'>
+                             P25: {float(row["p25_return"]):+.1f}%
+                             / P75:
+                             {float(row["p75_return"]):+.1f}%
+                             </div>
+                    </div>""", unsafe_allow_html=True)
+            st.markdown("")
+
+        if not analog_dates.empty:
+            top_date = pd.Timestamp(
+                analog_dates.iloc[0]['analog_date'])
+            top_sim  = float(
+                analog_dates.iloc[0]['similarity']) * 100
+            st.markdown(f"""<div class='commentary-box'>
+            📌 <strong>Analog Commentary:</strong>
+            Current macro conditions most closely resemble
+            <strong>{top_date.strftime('%B %Y')}</strong>
+            ({top_sim:.1f}% similarity).
+            Based on VIX level, yield curve shape, momentum
+            across 4 asset classes, and macro regime.
+            Forward return expectations above reflect what
+            actually happened after these
+            {len(analog_dates)} historical periods.
+            These are tendencies, not predictions.
+            </div>""", unsafe_allow_html=True)
+
+# ── TAB 7: WALK-FORWARD ───────────────────────────────────────
+with tab7:
+    st.subheader("Walk-Forward Backtest")
+    st.caption(
+        "Out-of-sample validation — each year tested on "
+        "data the model never saw"
+    )
+
+    if wf_portfolio.empty:
+        st.warning(
+            "No walk-forward data. "
+            "Run 18_walkforward_backtest.py first."
+        )
+    else:
+        avg_port_sharpe = wf_portfolio['port_sharpe'].mean()
+        avg_bnh_sharpe  = wf_portfolio['bnh_sharpe'].mean()
+        years_beat      = wf_portfolio['beat_bnh'].sum()
+        total_years     = len(wf_portfolio)
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(
+            "Avg Out-of-Sample Sharpe",
+            f"{avg_port_sharpe:.3f}",
+            f"{avg_port_sharpe-avg_bnh_sharpe:+.3f} vs B&H"
+        )
+        m2.metric("Avg B&H Sharpe", f"{avg_bnh_sharpe:.3f}")
+        m3.metric(
+            "Years Beating B&H",
+            f"{years_beat}/{total_years}",
+            f"{years_beat/total_years*100:.0f}%"
+        )
+        m4.metric(
+            "Verdict",
+            "ROBUST" if avg_port_sharpe > 0.4 else "MARGINAL"
+        )
+
+        st.markdown("#### Portfolio Walk-Forward Performance")
+        fig_wf = go.Figure()
+        fig_wf.add_trace(go.Bar(
+            x=wf_portfolio['year'],
+            y=wf_portfolio['port_sharpe'],
+            name='Strategy Sharpe',
+            marker_color=[
+                GREEN if v > 0 else RED
+                for v in wf_portfolio['port_sharpe']
+            ]
+        ))
+        fig_wf.add_trace(go.Scatter(
+            x=wf_portfolio['year'],
+            y=wf_portfolio['bnh_sharpe'],
+            name='B&H Sharpe',
+            line=dict(color='gray', width=2, dash='dash')
+        ))
+        fig_wf.add_hline(
+            y=0, line_color='black', line_width=0.8)
+        fig_wf.update_layout(
+            height=380, template='plotly_white',
+            yaxis_title='Sharpe Ratio',
+            xaxis_title='Year (out-of-sample)',
+            hovermode='x unified',
+            title='Annual Out-of-Sample Sharpe — '
+                   'Strategy vs B&H'
+        )
+        st.plotly_chart(fig_wf, use_container_width=True)
+
+        fig_cagr = go.Figure()
+        fig_cagr.add_trace(go.Bar(
+            x=wf_portfolio['year'],
+            y=wf_portfolio['port_cagr'],
+            name='Strategy CAGR',
+            marker_color=[
+                GREEN if v > 0 else RED
+                for v in wf_portfolio['port_cagr']
+            ]
+        ))
+        fig_cagr.add_trace(go.Scatter(
+            x=wf_portfolio['year'],
+            y=wf_portfolio['bnh_cagr'],
+            name='B&H CAGR',
+            line=dict(color='gray', width=2, dash='dash')
+        ))
+        fig_cagr.add_hline(
+            y=0, line_color='black', line_width=0.8)
+        fig_cagr.update_layout(
+            height=350, template='plotly_white',
+            yaxis_title='CAGR (%)',
+            xaxis_title='Year (out-of-sample)',
+            hovermode='x unified',
+            title='Annual Out-of-Sample CAGR — Strategy vs B&H'
+        )
+        st.plotly_chart(fig_cagr, use_container_width=True)
+
+        st.markdown("#### Per-Asset Walk-Forward Summary")
+        if not wf_results.empty:
+            asset_summary = wf_results.groupby('asset').agg(
+                avg_sharpe    =('strat_sharpe', 'mean'),
+                avg_bnh_sharpe=('bnh_sharpe',   'mean'),
+                avg_maxdd     =('strat_maxdd',   'mean'),
+                avg_bnh_maxdd =('bnh_maxdd',     'mean'),
+                years_positive=('strat_sharpe',
+                                 lambda x: (x > 0).sum()),
+                total_years   =('strat_sharpe', 'count'),
+            ).reset_index()
+
+            fig_asset = go.Figure()
+            fig_asset.add_trace(go.Bar(
+                x=asset_summary['asset'],
+                y=asset_summary['avg_sharpe'],
+                name='Strategy Sharpe',
+                marker_color=MID_BLUE
+            ))
+            fig_asset.add_trace(go.Bar(
+                x=asset_summary['asset'],
+                y=asset_summary['avg_bnh_sharpe'],
+                name='B&H Sharpe',
+                marker_color=GRAY
+            ))
+            fig_asset.update_layout(
+                height=350, template='plotly_white',
+                barmode='group',
+                yaxis_title='Avg Sharpe Ratio',
+                title='Average Out-of-Sample Sharpe by Asset'
+            )
+            st.plotly_chart(
+                fig_asset, use_container_width=True)
+
+        st.markdown(f"""<div class='commentary-box'>
+        📌 <strong>Walk-Forward Commentary:</strong>
+        Combined portfolio achieved average out-of-sample
+        Sharpe of <strong>{avg_port_sharpe:.3f}</strong> vs
+        <strong>{avg_bnh_sharpe:.3f}</strong> B&H across
+        <strong>{total_years} years</strong> of unseen data.
+        Beat buy-and-hold in
+        <strong>{years_beat} out of {total_years} years</strong>.
+        Each year was tested on data the model had never seen.
+        </div>""", unsafe_allow_html=True)
+
 st.markdown("---")
 
-# ════════════════════════════════════════════════════════════════════
-# LAYER 3 — DEEP DIVE (expanders)
-# ════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════
+# LAYER 3 — DEEP DIVE
+# ═════════════════════════════════════════════════════════════
+
 st.markdown("### 🔬 Layer 3 — Deep Dive Analytics")
 
 with st.expander("📊 Annual Returns by Asset"):
     returns_all = pd.DataFrame({
-        'NIFTY':  nifty_f.pct_change(),
-        'SP500':  sp500_f.pct_change(),
-        'Gold':   gold_f.pct_change(),
-        'Crude':  crude_f.pct_change(),
+        'NIFTY': nifty_f.pct_change(),
+        'SP500': sp500_f.pct_change(),
+        'Gold':  gold_f.pct_change(),
+        'Crude': crude_f.pct_change(),
     }).dropna()
-
-    annual = (1 + returns_all).resample('YE').prod() - 1
+    annual     = (1 + returns_all).resample('YE').prod() - 1
     annual.index = annual.index.year
     annual_pct = annual * 100
-
-    fig_ann = px.bar(annual_pct, barmode='group',
-                      color_discrete_map={'NIFTY': BLUE, 'SP500': MID_BLUE,
-                                          'Gold': ORANGE, 'Crude': "#7030A0"},
-                      title="Annual Returns (%) by Asset Class")
+    fig_ann = px.bar(
+        annual_pct, barmode='group',
+        color_discrete_map={
+            'NIFTY': BLUE, 'SP500': MID_BLUE,
+            'Gold': ORANGE, 'Crude': "#7030A0"
+        },
+        title="Annual Returns (%) by Asset Class"
+    )
     fig_ann.add_hline(y=0, line_color="black", line_width=0.8)
-    fig_ann.update_layout(height=420, template="plotly_white",
-                           yaxis_title="Annual Return (%)")
+    fig_ann.update_layout(
+        height=420, template="plotly_white",
+        yaxis_title="Annual Return (%)"
+    )
     st.plotly_chart(fig_ann, use_container_width=True)
 
 with st.expander("📋 Raw Price Data Table"):
@@ -951,25 +1378,34 @@ with st.expander("📋 Raw Price Data Table"):
         'VIX':     vix_f,
         'USD_INR': usd_inr_f,
     }).tail(30)
-    st.dataframe(raw_df.style.format("{:.2f}"), use_container_width=True)
+    st.dataframe(
+        raw_df.style.format("{:.2f}"),
+        use_container_width=True
+    )
 
 with st.expander("📈 Rolling Statistics"):
-    stat_asset = st.selectbox("Select asset", ["NIFTY","SP500","Gold","Crude"])
-    stat_map   = {"NIFTY": nifty_f, "SP500": sp500_f, "Gold": gold_f, "Crude": crude_f}
+    stat_asset = st.selectbox(
+        "Select asset",
+        ["NIFTY","SP500","Gold","Crude"]
+    )
+    stat_map = {
+        "NIFTY": nifty_f, "SP500": sp500_f,
+        "Gold":  gold_f,  "Crude": crude_f
+    }
     s = stat_map[stat_asset].pct_change().dropna() * 100
-
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Mean Daily Return", f"{s.mean():.4f}%")
     c2.metric("Volatility (Ann.)", f"{s.std()*np.sqrt(252):.1f}%")
     c3.metric("Best Day",          f"{s.max():+.2f}%")
     c4.metric("Worst Day",         f"{s.min():+.2f}%")
-
-    sharpe = (s.mean() / s.std()) * np.sqrt(252) if s.std() > 0 else 0
+    sharpe = (s.mean()/s.std())*np.sqrt(252) \
+              if s.std() > 0 else 0
     st.metric("Sharpe Ratio (approx)", f"{sharpe:.3f}")
 
 # Footer
 st.markdown(f"""
-<div style='text-align:center; padding:20px; color:{GRAY}; font-size:12px;'>
+<div style='text-align:center; padding:20px;
+     color:{GRAY}; font-size:12px;'>
     Global Macro Intelligence System &nbsp;|&nbsp;
     Built by Niraj Mutha &nbsp;|&nbsp;
     Data: Yahoo Finance, FRED &nbsp;|&nbsp;
