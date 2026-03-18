@@ -1,7 +1,7 @@
 # ============================================================
-# DAILY REFRESH SCRIPT
+# GMIS DAILY REFRESH SCRIPT
 # Run this every morning before opening the dashboard
-# Takes about 2-3 minutes to complete
+# Takes about 3-4 minutes to complete (FinBERT adds ~40 secs)
 # ============================================================
 
 import subprocess
@@ -31,11 +31,12 @@ print(f"{datetime.now().strftime('%A %d %B %Y — %H:%M')}")
 print(f"{'='*50}")
 
 scripts = [
-    '01_data_collection.py',    # Fresh prices
-    '02_macro_data.py',         # Fresh macro data
-    '03_database_setup.py',     # Rebuild database
-    '09_sentiment_engine.py',   # Live headlines
-    '12_signal_engine.py',      # Recalculate signals
+    '01_data_collection.py',     # Fresh market prices
+    '02_macro_data.py',          # Fresh macro data from FRED
+    '03_database_setup.py',      # Rebuild database
+    '15_finbert_sentiment.py',   # FinBERT sentiment (replaces 09)
+    '12_signal_engine.py',       # Recalculate signals
+    '14_alert_engine.py',        # Check for alerts and notify
 ]
 
 failed = []
@@ -53,6 +54,3 @@ else:
     print(f"✅ Dashboard is ready with today's data")
     print(f"\nRun: streamlit run dashboard.py")
 print(f"{'='*50}\n")
-# Run alert check after every refresh
-import subprocess
-subprocess.run(['python', '14_alert_engine.py'], cwd=os.path.dirname(os.path.abspath(__file__)))
