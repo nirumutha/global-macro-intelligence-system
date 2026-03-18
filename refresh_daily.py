@@ -53,3 +53,6 @@ else:
     print(f"✅ Dashboard is ready with today's data")
     print(f"\nRun: streamlit run dashboard.py")
 print(f"{'='*50}\n")
+# Run alert check after every refresh
+import subprocess
+subprocess.run(['python', '14_alert_engine.py'], cwd=os.path.dirname(os.path.abspath(__file__)))

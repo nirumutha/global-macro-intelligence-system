@@ -77,7 +77,7 @@ st.markdown("""
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 DB_PATH   = os.path.join(BASE_PATH, 'data', 'macro_system.db')
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def load_close(table):
     conn = sqlite3.connect(DB_PATH)
     df   = pd.read_sql(f"SELECT * FROM {table}", conn)
@@ -87,7 +87,7 @@ def load_close(table):
     close_col = [c for c in df.columns if 'Close' in c or 'close' in c]
     return df[close_col[0]].dropna() if close_col else df.iloc[:, 0].dropna()
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def load_macro(table):
     conn = sqlite3.connect(DB_PATH)
     df   = pd.read_sql(f"SELECT * FROM {table}", conn)
@@ -96,7 +96,7 @@ def load_macro(table):
     df = df.set_index('Date').sort_index()
     return df.iloc[:, 0].dropna()
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def load_sentiment():
     conn = sqlite3.connect(DB_PATH)
     try:
@@ -163,6 +163,9 @@ def generate_signal(asset_name, price_series, vix_series):
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/48/combo-chart.png", width=48)
     st.title("GMIS Controls")
+    if st.sidebar.button("🔄 Clear Cache & Refresh"):
+        st.cache_data.clear()
+        st.rerun()
     st.markdown("---")
 
     # Date range filter
@@ -313,7 +316,7 @@ with col5:
     st.markdown(f"""
     <div class='metric-card {sent_color}'>
         <div style='font-size:11px; color:{GRAY}; text-transform:uppercase;'>Sentiment</div>
-        <div style='font-size:20px; font-weight:bold color:#1F3864;'>{overall_sentiment}</div>
+        <div style='font-size:20px; font-weight:bold; color:#1F3864;'>{overall_sentiment}</div>
         <div style='font-size:11px; color:{GRAY};'>Score: {sentiment_score:+.3f}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -588,7 +591,7 @@ with tab5:
     st.caption("15 years of real data | Transaction cost: 0.1% per trade | No leverage")
 
     # ── Load signals from database ────────────────────────────
-    @st.cache_data(ttl=3600)
+    @st.cache_data(ttl=300)
     def load_signals():
         conn = sqlite3.connect(DB_PATH)
         try:
