@@ -40,10 +40,4 @@ for script in scripts:
 print(f"\n{'='*50}")
 print(f"WEEKLY REFRESH COMPLETE")
 print(f"{'='*50}\n")
-```
 
-Save both files then push:
-```
-git add .
-git commit -m "Module 18: Walk-forward backtest - 0.727 out-of-sample Sharpe verified robust"
-git push origin main
