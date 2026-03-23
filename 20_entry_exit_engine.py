@@ -50,9 +50,21 @@ def load_price_data(asset):
 
     df = pd.read_csv(filepath)
 
-    # Rename columns — CSV uses 'Price' for date
+    # Drop non-date rows like 'Ticker', 'Date' headers
+    df = df[~df['Price'].astype(str).str.match(
+        r'^[A-Za-z]', na=False
+    )]
+
+    # Rename Price column to Date
     df = df.rename(columns={'Price': 'Date'})
-    df['Date'] = pd.to_datetime(df['Date'])
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+    df = df.dropna(subset=['Date'])
+
+    # Convert all price columns to numeric
+    for col in ['Close', 'High', 'Low', 'Open']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
     df = df.sort_values('Date').dropna(subset=['Close'])
     df = df.set_index('Date')
 
@@ -181,15 +193,9 @@ def calculate_levels(asset, bias, df, atr,
                       tech, analog_df, confidence):
     """
     Calculate entry zone, target zone, and stop level.
-
     Entry zone: current price ± 2×ATR
     Target zone: based on analog median return
-    Stop level: 3×ATR from entry (or nearest support/resistance)
-
-    Zone width is adjusted based on confidence:
-    HIGH confidence = tighter zones
-    MEDIUM confidence = standard zones
-    LOW confidence = wider zones
+    Stop level: 3×ATR from entry
     """
     current = tech['current']
 
@@ -218,66 +224,51 @@ def calculate_levels(asset, bias, df, atr,
         prob_pos   = 50.0
 
     if bias == 'LONG':
-        # ── Entry zone ────────────────────────────────────────
-        # Lower: MA20 or nearest support (whichever is higher)
-        # Upper: current price + 2×ATR (do not chase beyond)
         entry_low  = max(
             tech['ma20'],
             tech['nearest_support']
         ) * width_mult
         entry_high = current + (atr * 2 * width_mult)
 
-        # If price is already below MA20, adjust entry
         if current < tech['ma20']:
             entry_low  = current - (atr * width_mult)
             entry_high = current + (atr * 2 * width_mult)
 
-        # ── Target zone ───────────────────────────────────────
-        # Based on analog median and P75 returns
         target_low  = current * (1 + max(median_ret, 1.0) / 100)
         target_high = current * (1 + max(p75_ret,    2.0) / 100)
-
-        # Cap target below nearest resistance
         target_high = min(
             target_high,
             tech['nearest_resistance'] * 1.02
         )
 
-        # ── Stop level ────────────────────────────────────────
-        # 3×ATR below entry midpoint OR nearest support - 1×ATR
-        entry_mid   = (entry_low + entry_high) / 2
-        stop_atr    = entry_mid - (atr * 3 * width_mult)
-        stop_support= tech['nearest_support'] - atr
-        stop_level  = max(stop_atr, stop_support)
+        entry_mid    = (entry_low + entry_high) / 2
+        stop_atr     = entry_mid - (atr * 3 * width_mult)
+        stop_support = tech['nearest_support'] - atr
+        stop_level   = max(stop_atr, stop_support)
 
     elif bias == 'SHORT':
-        # ── Entry zone ────────────────────────────────────────
         entry_high = min(
             tech['ma20'],
             tech['nearest_resistance']
         ) / width_mult
         entry_low  = current - (atr * 2 * width_mult)
 
-        # ── Target zone ───────────────────────────────────────
         target_high = current * (1 + min(median_ret, -1.0) / 100)
         target_low  = current * (1 + min(p25_ret,   -2.0) / 100)
-
-        # Cap target above nearest support
-        target_low = max(
+        target_low  = max(
             target_low,
             tech['nearest_support'] * 0.98
         )
 
-        # ── Stop level ────────────────────────────────────────
-        entry_mid    = (entry_low + entry_high) / 2
-        stop_atr     = entry_mid + (atr * 3 * width_mult)
-        stop_resist  = tech['nearest_resistance'] + atr
-        stop_level   = min(stop_atr, stop_resist)
+        entry_mid   = (entry_low + entry_high) / 2
+        stop_atr    = entry_mid + (atr * 3 * width_mult)
+        stop_resist = tech['nearest_resistance'] + atr
+        stop_level  = min(stop_atr, stop_resist)
 
     else:
         return None
 
-    # ── Risk/Reward ratio ─────────────────────────────────────
+    # Risk/Reward
     entry_mid  = (entry_low + entry_high) / 2
     target_mid = (target_low + target_high) / 2
 
@@ -288,30 +279,28 @@ def calculate_levels(asset, bias, df, atr,
         risk   = abs(stop_level - entry_mid)
         reward = abs(entry_mid - target_mid)
 
-    rr_ratio = round(reward / risk, 1) if risk > 0 else 0
-
-    # ── Round to sensible precision ───────────────────────────
+    rr_ratio  = round(reward / risk, 1) if risk > 0 else 0
     precision = 0 if current > 1000 else 2
 
     return {
-        'asset':       asset,
-        'bias':        bias,
-        'current':     round(current, precision),
-        'entry_low':   round(entry_low,   precision),
-        'entry_high':  round(entry_high,  precision),
-        'target_low':  round(target_low,  precision),
-        'target_high': round(target_high, precision),
-        'stop_level':  round(stop_level,  precision),
-        'rr_ratio':    rr_ratio,
-        'atr':         round(atr, precision),
-        'prob_pos':    prob_pos,
+        'asset':         asset,
+        'bias':          bias,
+        'current':       round(current,     precision),
+        'entry_low':     round(entry_low,   precision),
+        'entry_high':    round(entry_high,  precision),
+        'target_low':    round(target_low,  precision),
+        'target_high':   round(target_high, precision),
+        'stop_level':    round(stop_level,  precision),
+        'rr_ratio':      rr_ratio,
+        'atr':           round(atr,         precision),
+        'prob_pos':      prob_pos,
         'analog_median': median_ret,
-        'confidence':  confidence,
-        'entry_basis': f"MA20 ({tech['ma20']:.0f}) + "
-                        f"support ({tech['nearest_support']:.0f})",
-        'target_basis': f"Analog median {median_ret:+.1f}% → "
-                         f"P75 {p75_ret:+.1f}%",
-        'stop_basis':  f"3×ATR ({atr:.0f}×3) below entry",
+        'confidence':    confidence,
+        'entry_basis':   f"MA20 ({tech['ma20']:.0f}) + "
+                          f"support ({tech['nearest_support']:.0f})",
+        'target_basis':  f"Analog median {median_ret:+.1f}% → "
+                          f"P75 {p75_ret:+.1f}%",
+        'stop_basis':    f"3×ATR ({atr:.0f}×3) below entry",
     }
 
 # ═════════════════════════════════════════════════════════════
@@ -319,7 +308,7 @@ def calculate_levels(asset, bias, df, atr,
 # ═════════════════════════════════════════════════════════════
 
 def load_latest_decisions():
-    """Load today's decisions from database."""
+    """Load latest decisions from database."""
     conn = sqlite3.connect(DB_PATH)
     try:
         df = pd.read_sql(
@@ -329,7 +318,7 @@ def load_latest_decisions():
         conn.close()
         if df.empty:
             return {}
-        latest = df.groupby('asset').first().reset_index()
+        latest    = df.groupby('asset').first().reset_index()
         decisions = {}
         for _, row in latest.iterrows():
             decisions[row['asset']] = {
@@ -352,25 +341,25 @@ def save_levels(all_levels):
     """Save entry/exit levels to database."""
     conn  = sqlite3.connect(DB_PATH)
     today = datetime.now().strftime('%Y-%m-%d')
+    rows  = []
 
-    rows = []
     for asset, levels in all_levels.items():
         if levels is None:
             continue
         rows.append({
-            'date':          today,
-            'asset':         asset,
-            'bias':          levels['bias'],
-            'current':       levels['current'],
-            'entry_low':     levels['entry_low'],
-            'entry_high':    levels['entry_high'],
-            'target_low':    levels['target_low'],
-            'target_high':   levels['target_high'],
-            'stop_level':    levels['stop_level'],
-            'rr_ratio':      levels['rr_ratio'],
-            'atr':           levels['atr'],
-            'prob_pos':      levels['prob_pos'],
-            'confidence':    levels['confidence'],
+            'date':       today,
+            'asset':      asset,
+            'bias':       levels['bias'],
+            'current':    levels['current'],
+            'entry_low':  levels['entry_low'],
+            'entry_high': levels['entry_high'],
+            'target_low': levels['target_low'],
+            'target_high':levels['target_high'],
+            'stop_level': levels['stop_level'],
+            'rr_ratio':   levels['rr_ratio'],
+            'atr':        levels['atr'],
+            'prob_pos':   levels['prob_pos'],
+            'confidence': levels['confidence'],
         })
 
     if not rows:
@@ -420,8 +409,7 @@ def print_levels(all_levels, decisions):
             continue
 
         emoji = '🟢' if bias == 'LONG' else '🔴'
-        curr  = levels['currency'] if 'currency' \
-                in levels else ''
+        curr  = levels.get('currency', '')
 
         print(f"\n{emoji} {asset} — {bias}")
         print(f"   Current Price:  "
@@ -464,7 +452,7 @@ async def send_telegram(message):
 
 def build_telegram_message(all_levels, decisions):
     """Build Telegram message with levels."""
-    date = datetime.now().strftime('%d %b %Y %H:%M')
+    date  = datetime.now().strftime('%d %b %Y %H:%M')
     lines = [
         f"📐 <b>GMIS ENTRY/EXIT LEVELS</b>",
         f"{date}",
@@ -486,8 +474,9 @@ def build_telegram_message(all_levels, decisions):
         emoji = '🟢' if bias == 'LONG' else '🔴'
         conf  = d.get('confidence', '')
 
-        lines.append(f"{emoji} <b>{asset} — {bias}</b> "
-                     f"| {conf}")
+        lines.append(
+            f"{emoji} <b>{asset} — {bias}</b> | {conf}"
+        )
         lines.append(
             f"  Entry:  {levels['entry_low']:,.0f} — "
             f"{levels['entry_high']:,.0f}"
@@ -496,9 +485,7 @@ def build_telegram_message(all_levels, decisions):
             f"  Target: {levels['target_low']:,.0f} — "
             f"{levels['target_high']:,.0f}"
         )
-        lines.append(
-            f"  Stop:   {levels['stop_level']:,.0f}"
-        )
+        lines.append(f"  Stop:   {levels['stop_level']:,.0f}")
         lines.append(
             f"  R/R: {levels['rr_ratio']}:1 | "
             f"Prob: {levels['prob_pos']:.0f}%"
@@ -507,7 +494,9 @@ def build_telegram_message(all_levels, decisions):
 
     if not has_trade:
         lines.append("")
-        lines.append("⬜ <b>No trades today — all assets NO TRADE</b>")
+        lines.append(
+            "⬜ <b>No trades today — all assets NO TRADE</b>"
+        )
         lines.append("Patience. Wait for better alignment.")
 
     lines.append("<i>GMIS Entry/Exit Engine</i>")
@@ -523,7 +512,6 @@ def run_entry_exit_engine(send_telegram_flag=True):
     print(datetime.now().strftime('%A %d %B %Y — %H:%M'))
     print("="*65)
 
-    # Load decisions
     print("\nLoading decisions...")
     decisions = load_latest_decisions()
     if not decisions:
@@ -531,23 +519,13 @@ def run_entry_exit_engine(send_telegram_flag=True):
               "Run 19_decision_engine.py first.")
         return
 
-    print(f"  Loaded decisions for "
-          f"{len(decisions)} assets")
+    print(f"  Loaded decisions for {len(decisions)} assets")
 
-    # Calculate levels for each asset
     print("\nCalculating entry/exit levels...")
     all_levels = {}
 
-    asset_map = {
-        'NIFTY':  'NIFTY',
-        'SP500':  'SP500',
-        'Gold':   'Gold',
-        'Silver': 'Silver',
-        'Crude':  'Crude',
-    }
-
-    for asset, decision_key in asset_map.items():
-        d    = decisions.get(decision_key, {})
+    for asset in ['NIFTY', 'SP500', 'Gold', 'Silver', 'Crude']:
+        d    = decisions.get(asset, {})
         bias = d.get('bias', 'NO TRADE')
         conf = d.get('confidence', 'NONE')
 
@@ -557,29 +535,23 @@ def run_entry_exit_engine(send_telegram_flag=True):
             continue
 
         try:
-            # Load price data
-            df  = load_price_data(asset)
-            atr = calculate_atr(df)
-            tech = find_technical_levels(df)
-            analog_df = load_analog_outcomes(
-                decision_key
+            df        = load_price_data(asset)
+            atr       = calculate_atr(df)
+            tech      = find_technical_levels(df)
+            analog_df = load_analog_outcomes(asset)
+            levels    = calculate_levels(
+                asset, bias, df, atr, tech, analog_df, conf
             )
 
-            # Calculate levels
-            levels = calculate_levels(
-                asset, bias, df, atr,
-                tech, analog_df, conf
-            )
-
-            # Add currency symbol
             if levels:
-                currency = ASSET_CONFIG[asset]['currency']
-                levels['currency'] = currency
+                levels['currency'] = \
+                    ASSET_CONFIG[asset]['currency']
 
             all_levels[asset] = levels
+
             if levels:
                 print(f"  {asset}: {bias} | "
-                      f"Entry {tech['current']:,.0f} | "
+                      f"Current {tech['current']:,.0f} | "
                       f"ATR {atr:,.0f} | "
                       f"R/R {levels['rr_ratio']}:1")
 
@@ -587,14 +559,11 @@ def run_entry_exit_engine(send_telegram_flag=True):
             print(f"  ❌ {asset} failed: {e}")
             all_levels[asset] = None
 
-    # Save to database
     print("\nSaving levels...")
     save_levels(all_levels)
 
-    # Print full report
     print_levels(all_levels, decisions)
 
-    # Send Telegram
     if send_telegram_flag and BOT_TOKEN:
         print("\nSending Telegram...")
         msg = build_telegram_message(all_levels, decisions)
@@ -608,3 +577,4 @@ if __name__ == "__main__":
     run_entry_exit_engine(
         send_telegram_flag=not no_telegram
     )
+
