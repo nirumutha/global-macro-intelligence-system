@@ -39,6 +39,8 @@ scripts = [
     '14_alert_engine.py',        # Check for alerts and notify
     '16_signal_v3.py',
     '17_historical_analog.py',
+    '19_decision_engine.py',
+    '20_entry_exit_engine.py',
 ]
 
 failed = []
