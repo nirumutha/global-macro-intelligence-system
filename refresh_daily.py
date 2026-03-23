@@ -43,6 +43,7 @@ scripts = [
     '20_entry_exit_engine.py',
     '21_signal_tracker.py',
     '22_model_health.py', 
+    '23_physical_basis.py',
 ]
 
 failed = []
