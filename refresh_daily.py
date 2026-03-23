@@ -42,8 +42,9 @@ scripts = [
     '19_decision_engine.py',
     '20_entry_exit_engine.py',
     '21_signal_tracker.py',
-    '22_model_health.py', 
+    '22_model_health.py',
     '23_physical_basis.py',
+    '24_economic_calendar.py',  # Upcoming high-impact events
 ]
 
 failed = []
