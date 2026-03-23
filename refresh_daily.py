@@ -48,6 +48,7 @@ scripts = [
     '25_mtf_signals.py',        # Multi-timeframe signal confirmation
     '26_institutional_flows.py',# FII/DII flows, COT, PCR
     '27_portfolio_risk.py',     # Kelly sizing, correlation, drawdown
+    '28_correlation_regime.py', # Correlation shift detection & regime
 ]
 
 failed = []
