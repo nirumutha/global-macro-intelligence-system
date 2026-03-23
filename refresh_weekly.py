@@ -32,6 +32,7 @@ print(f"{'='*50}")
 
 scripts = [
     '18_walkforward_backtest.py',  # ~90 seconds
+    '21_signal_tracker.py --report',
 ]
 
 for script in scripts:

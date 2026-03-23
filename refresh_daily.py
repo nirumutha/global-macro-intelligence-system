@@ -41,6 +41,7 @@ scripts = [
     '17_historical_analog.py',
     '19_decision_engine.py',
     '20_entry_exit_engine.py',
+    '21_signal_tracker.py',
 ]
 
 failed = []
