@@ -46,6 +46,7 @@ scripts = [
     '23_physical_basis.py',
     '24_economic_calendar.py',  # Upcoming high-impact events
     '25_mtf_signals.py',        # Multi-timeframe signal confirmation
+    '26_institutional_flows.py',# FII/DII flows, COT, PCR
 ]
 
 failed = []
