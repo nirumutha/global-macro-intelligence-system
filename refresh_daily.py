@@ -49,6 +49,7 @@ scripts = [
     '26_institutional_flows.py',# FII/DII flows, COT, PCR
     '27_portfolio_risk.py',     # Kelly sizing, correlation, drawdown
     '28_correlation_regime.py', # Correlation shift detection & regime
+    '29_external_intelligence.py', # Tiered RSS + FinBERT + theme extraction
 ]
 
 failed = []
