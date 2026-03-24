@@ -56,6 +56,7 @@ scripts = [
     '33_geopolitical_premium.py',  # Oil & Gold risk premium vs fundamental fair value
     '34_narrative_engine.py',      # Market narrative scoring, momentum, asset impact map
     '35_dynamic_weights.py',       # Monthly IC-based weight adjustment for decision engine
+    '36_execution_friction.py',    # Slippage, spread, backtest adjustment, trade timing
 ]
 
 failed = []
