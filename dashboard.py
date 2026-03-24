@@ -166,6 +166,36 @@ signals_v3_df            = load_signals_v3()
 analog_dates, analog_outcomes = load_analog_outcomes()
 wf_results, wf_portfolio = load_walkforward()
 
+# ── Generic safe loader for new module tables ─────────────────
+@st.cache_data(ttl=300)
+def safe_load(table: str, order_col: str = 'date', limit: int = 0) -> pd.DataFrame:
+    """Load any DB table gracefully — returns empty DataFrame on error."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        q = f'SELECT * FROM "{table}"'
+        if order_col:
+            q += f' ORDER BY {order_col} DESC'
+        if limit > 0:
+            q += f' LIMIT {limit}'
+        df = pd.read_sql(q, conn)
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+def sfloat(val, default: float = 0.0) -> float:
+    """Safe float — handles None, NaN, empty strings."""
+    try:
+        v = float(val)
+        return default if (v != v) else v   # NaN check
+    except Exception:
+        return default
+
+# Pre-load tables needed for Layer 1 and banner
+decisions_df  = safe_load('DECISIONS',        limit=20)
+entry_exit_df = safe_load('ENTRY_EXIT',        limit=10)
+calendar_df   = safe_load('ECONOMIC_CALENDAR', limit=60)
+
 # ═════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
 # ═════════════════════════════════════════════════════════════
@@ -355,6 +385,54 @@ st.markdown(f"""
 # LAYER 1 — MARKET INTELLIGENCE SNAPSHOT
 # ═════════════════════════════════════════════════════════════
 
+# ── Economic Calendar — High-Impact Warning Banner ────────────
+try:
+    if not calendar_df.empty and 'date' in calendar_df.columns:
+        _cal = calendar_df.copy()
+        _cal['date'] = pd.to_datetime(_cal['date'], errors='coerce')
+        _today = pd.Timestamp.now().normalize()
+        _h48   = _today + pd.Timedelta(days=2)
+        _h7d   = _today + pd.Timedelta(days=7)
+        _impact_col = [c for c in _cal.columns
+                       if c.lower() == 'impact']
+        if _impact_col:
+            _high = _cal[
+                _cal[_impact_col[0]].str.upper().str.strip() == 'HIGH'
+            ]
+            _soon = _high[
+                (_high['date'] >= _today) & (_high['date'] <= _h48)
+            ]
+            _week = _high[
+                (_high['date'] > _h48) & (_high['date'] <= _h7d)
+            ]
+            if len(_soon) > 0 or len(_week) > 0:
+                _parts = []
+                for _, _ev in _soon.iterrows():
+                    _t = str(_ev.get('time', '')).strip()
+                    _t = '' if _t in ('', 'nan', 'None') else f' {_t}'
+                    _parts.append(
+                        f"🔴 <strong>{_ev.get('event','?')}</strong>"
+                        f" ({_ev.get('country','?')}){_t}"
+                    )
+                for _, _ev in _week.iterrows():
+                    _diff = max(1, (_ev['date'] - _today).days)
+                    _parts.append(
+                        f"🟡 <strong>{_ev.get('event','?')}</strong>"
+                        f" in {_diff}d ({_ev.get('country','?')})"
+                    )
+                _border = RED if len(_soon) > 0 else ORANGE
+                _bg     = '#FFF0F0' if len(_soon) > 0 else '#FFFBEA'
+                st.markdown(
+                    f"<div style='background:{_bg};border-left:4px solid "
+                    f"{_border};padding:8px 16px;border-radius:4px;"
+                    f"margin-bottom:12px;font-size:13px;'>"
+                    f"⚠️ <strong>High-Impact Events:</strong> &nbsp;"
+                    f"{'&nbsp;&nbsp;|&nbsp;&nbsp;'.join(_parts)}</div>",
+                    unsafe_allow_html=True
+                )
+except Exception:
+    pass
+
 st.markdown("### 🎯 Layer 1 — Market Intelligence Snapshot")
 st.caption("The 60-second view — understand the full market state at a glance")
 
@@ -425,75 +503,117 @@ with col5:
              Score: {sentiment_score:+.3f}</div>
     </div>""", unsafe_allow_html=True)
 
-# ── Signal row — V3 with confidence ──────────────────────────
-st.markdown("#### 📡 Active Trading Signals")
-sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+# ── Decision Engine signal badges ────────────────────────────
+st.markdown("#### 🎯 Decision Engine — Active Signals")
 
-def signal_badge_v3(label, signal, score, confidence, stable):
-    badge_class = \
-        f"badge-{'long' if signal=='Long' else 'short' if signal=='Short' else 'neutral'}"
-    conf_color = "#1E6B3C" if confidence == 'HIGH' else \
-                 "#C55A11" if confidence == 'MEDIUM' else \
-                 "#595959"
-    stab_icon = "✅" if stable == signal else "⏳"
-    return f"""
-    <div style='text-align:center; padding:10px; background:white;
-         border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);'>
-        <div style='font-size:11px; color:{GRAY};
-             margin-bottom:4px;'>{label}</div>
-        <span class='signal-badge {badge_class}'>{signal}</span>
-        <div style='font-size:10px; color:{conf_color};
-             margin-top:4px; font-weight:bold;'>{confidence}</div>
-        <div style='font-size:10px; color:{GRAY};'>
-             {stab_icon} {score:+.2f}</div>
-    </div>"""
+_DE_ASSETS = [
+    ('NIFTY',  'NIFTY 50'),
+    ('SP500',  'S&P 500'),
+    ('Gold',   'Gold'),
+    ('Silver', 'Silver'),
+    ('Crude',  'Crude WTI'),
+]
 
-with sc1:
-    st.markdown(signal_badge_v3(
-        "NIFTY 50", nifty_sig, nifty_score,
-        nifty_conf, nifty_stable),
-        unsafe_allow_html=True)
-with sc2:
-    st.markdown(signal_badge_v3(
-        "S&P 500", sp500_sig, sp500_score,
-        sp500_conf, sp500_stable),
-        unsafe_allow_html=True)
-with sc3:
-    st.markdown(signal_badge_v3(
-        "Gold", gold_sig, gold_score,
-        gold_conf, gold_stable),
-        unsafe_allow_html=True)
-with sc4:
-    st.markdown(signal_badge_v3(
-        "Crude WTI", crude_sig, crude_score,
-        crude_conf, crude_stable),
-        unsafe_allow_html=True)
-with sc5:
-    st.markdown(f"""
-    <div style='text-align:center; padding:10px; background:white;
-         border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1);'>
-        <div style='font-size:11px; color:{GRAY};
-             margin-bottom:4px;'>Yield Curve</div>
-        <span class='signal-badge {"badge-short" if "Inverted" in curve_shape else "badge-long"}'>{curve_shape}</span>
-    </div>""", unsafe_allow_html=True)
+def _get_dec(asset_key):
+    if decisions_df.empty:
+        return None
+    rows = decisions_df[
+        decisions_df['asset'].str.upper() == asset_key.upper()
+    ]
+    return rows.iloc[0] if len(rows) > 0 else None
 
-# Dynamic commentary
+def _get_ee(asset_key):
+    if entry_exit_df.empty:
+        return None
+    rows = entry_exit_df[
+        entry_exit_df['asset'].str.upper() == asset_key.upper()
+    ]
+    return rows.iloc[0] if len(rows) > 0 else None
+
+def decision_badge_html(label, asset_key):
+    d  = _get_dec(asset_key)
+    ee = _get_ee(asset_key)
+    if d is not None:
+        bias     = str(d.get('bias', 'NEUTRAL')).upper()
+        combined = sfloat(d.get('combined', 0))
+        conf     = str(d.get('confidence', 'LOW'))
+        agr      = sfloat(d.get('agreement', 0))
+    else:
+        sig, score, conf_v3, _ = get_v3_signal(asset_key)
+        bias = sig.upper(); combined = score
+        conf = conf_v3;     agr      = 0.0
+    if 'LONG' in bias:
+        badge_cls, txt_col = 'badge-long',    GREEN
+    elif 'SHORT' in bias:
+        badge_cls, txt_col = 'badge-short',   RED
+    else:
+        badge_cls, txt_col = 'badge-neutral', ORANGE
+    conf_col = GREEN if conf == 'HIGH' else \
+               ORANGE if conf == 'MEDIUM' else GRAY
+    entry_stop = ''
+    if ee is not None:
+        try:
+            el = sfloat(ee.get('entry_low'))
+            eh = sfloat(ee.get('entry_high'))
+            sl = sfloat(ee.get('stop_level'))
+            if el > 0 and eh > 0:
+                entry_stop += (
+                    f"<div style='font-size:10px;color:{GRAY};"
+                    f"margin-top:3px;'>Entry "
+                    f"{el:,.0f}–{eh:,.0f}</div>"
+                )
+            if sl > 0:
+                entry_stop += (
+                    f"<div style='font-size:10px;color:{RED};'>"
+                    f"Stop {sl:,.0f}</div>"
+                )
+        except Exception:
+            pass
+    return (
+        f"<div style='text-align:center;padding:10px;background:white;"
+        f"border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);'>"
+        f"<div style='font-size:11px;color:{GRAY};margin-bottom:4px;'>"
+        f"{label}</div>"
+        f"<span class='signal-badge {badge_cls}'>{bias}</span>"
+        f"<div style='font-size:11px;font-weight:bold;color:{conf_col};"
+        f"margin-top:4px;'>{conf} | {combined:+.2f}</div>"
+        f"<div style='font-size:10px;color:{GRAY};'>Agr: {agr:.0f}%</div>"
+        f"{entry_stop}</div>"
+    )
+
+dc1, dc2, dc3, dc4, dc5 = st.columns(5)
+for _col, (_akey, _alabel) in zip(
+        [dc1, dc2, dc3, dc4, dc5], _DE_ASSETS):
+    with _col:
+        st.markdown(decision_badge_html(_alabel, _akey),
+                    unsafe_allow_html=True)
+
+# vix_pct — also used in Tab 2 volatility commentary
 vix_pct = (vix_f.rank(pct=True).iloc[-1] * 100) \
            if len(vix_f) > 0 else 50
-commentary = f"""
-📌 <strong>System Commentary
-({end_date.strftime('%d %b %Y')}):</strong>
-Market is in <strong>{regime_label}</strong> regime with VIX at
-{curr_vix:.1f} ({vix_pct:.0f}th percentile of selected history).
-Yield curve is <strong>{curve_shape}</strong>
-(spread: {curr_spread:+.2f}%).
-Sentiment reads <strong>{overall_sentiment}</strong>
-({sentiment_score:+.3f}).
-NIFTY signal is <strong>{nifty_sig}</strong>
-(Confidence: {nifty_conf}) |
-S&P 500 signal is <strong>{sp500_sig}</strong> |
-Gold signal is <strong>{gold_sig}</strong>.
-"""
+
+_nd = _get_dec('NIFTY')
+_sd = _get_dec('SP500')
+_gd = _get_dec('Gold')
+_nbias = str(_nd.get('bias', nifty_sig)) if _nd is not None else nifty_sig
+_sbias = str(_sd.get('bias', sp500_sig)) if _sd is not None else sp500_sig
+_gbias = str(_gd.get('bias', gold_sig))  if _gd is not None else gold_sig
+_nconf = str(_nd.get('confidence', nifty_conf)) if _nd is not None else nifty_conf
+
+commentary = (
+    f"📌 <strong>System Commentary "
+    f"({end_date.strftime('%d %b %Y')}):</strong> "
+    f"Market is in <strong>{regime_label}</strong> regime. "
+    f"VIX: {curr_vix:.1f} ({vix_pct:.0f}th pct). "
+    f"Yield curve: <strong>{curve_shape}</strong> "
+    f"({curr_spread:+.2f}%). "
+    f"Sentiment: <strong>{overall_sentiment}</strong> "
+    f"({sentiment_score:+.3f}). "
+    f"Decision Engine — NIFTY: <strong>{_nbias}</strong> "
+    f"(conf: {_nconf}) | "
+    f"S&P 500: <strong>{_sbias}</strong> | "
+    f"Gold: <strong>{_gbias}</strong>."
+)
 st.markdown(
     f"<div class='commentary-box'>{commentary}</div>",
     unsafe_allow_html=True
@@ -507,10 +627,13 @@ st.markdown("---")
 
 st.markdown("### 📈 Layer 2 — Interactive Analysis")
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, \
+tab8, tab9, tab10, tab11 = st.tabs([
     "🌍 Macro", "📊 Volatility", "💱 FX & Bonds",
     "😐 Sentiment", "📉 Backtest",
-    "🔮 Analogs", "📋 Walk-Forward"
+    "🔮 Analogs", "📋 Walk-Forward",
+    "📊 Decision Engine", "🇮🇳 India Intelligence",
+    "⚠️ Risk Monitor", "🌊 Intelligence",
 ])
 
 # ── TAB 1: MACRO ──────────────────────────────────────────────
@@ -1334,6 +1457,895 @@ with tab7:
         <strong>{years_beat} out of {total_years} years</strong>.
         Each year was tested on data the model had never seen.
         </div>""", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+# TAB 8 — DECISION ENGINE
+# ══════════════════════════════════════════════════════════════
+with tab8:
+    st.subheader("Decision Engine — Full Layer Breakdown")
+    st.caption("IC-weighted signal aggregation across 6 layers for every asset")
+
+    # ── 1. Layer scores ───────────────────────────────────────
+    decs = safe_load('DECISIONS', limit=50)
+    if decs.empty:
+        st.warning("No DECISIONS data. Run 19_decision_engine.py first.")
+    else:
+        _ld = decs['date'].max()
+        latest_decs = decs[decs['date'] == _ld].copy()
+        st.markdown(f"**Latest run: {_ld}**")
+
+        _layer_cols = ['layer_signal', 'layer_analog', 'layer_sentiment',
+                       'layer_macro',  'layer_yield',  'layer_vix']
+        _dcols = st.columns(min(len(latest_decs), 5))
+        for _i, (_, _row) in enumerate(latest_decs.iterrows()):
+            if _i >= 5:
+                break
+            with _dcols[_i]:
+                _bias = str(_row.get('bias', 'N/A')).upper()
+                _comb = sfloat(_row.get('combined', 0))
+                _conf = str(_row.get('confidence', '?'))
+                _agr  = sfloat(_row.get('agreement', 0))
+                _cc   = ('metric-positive' if 'LONG'  in _bias else
+                         'metric-negative' if 'SHORT' in _bias else
+                         'metric-neutral')
+                _tc   = (GREEN  if 'LONG'  in _bias else
+                         RED    if 'SHORT' in _bias else ORANGE)
+                _lhtml = ''
+                for _lc in _layer_cols:
+                    _lv = _row.get(_lc)
+                    if _lv is not None:
+                        _lname = _lc.replace('layer_', '')
+                        _lhtml += (
+                            f"<div style='font-size:10px;color:{GRAY};'>"
+                            f"{_lname}: {sfloat(_lv):+.3f}</div>"
+                        )
+                st.markdown(f"""
+                <div class='metric-card {_cc}'>
+                    <div style='font-size:11px;color:{GRAY};
+                         text-transform:uppercase;'>
+                         {_row.get('asset','?')}</div>
+                    <div style='font-size:22px;font-weight:bold;
+                         color:{_tc};'>{_bias}</div>
+                    <div style='font-size:11px;color:{GRAY};'>
+                         Score: {_comb:+.3f}</div>
+                    <div style='font-size:11px;color:{GRAY};'>
+                         {_conf} | Agr: {_agr:.0f}%</div>
+                    <hr style='margin:4px 0;border-color:#eee;'>
+                    {_lhtml}
+                </div>""", unsafe_allow_html=True)
+
+        with st.expander("📋 Full Decisions Table"):
+            st.dataframe(decs, use_container_width=True)
+
+    st.markdown("---")
+
+    # ── 2. Dynamic weights ────────────────────────────────────
+    st.subheader("Dynamic IC Weights")
+    weights_df = safe_load('DYNAMIC_WEIGHTS', limit=200)
+    if weights_df.empty:
+        st.warning("No DYNAMIC_WEIGHTS data. Run 35_dynamic_weights.py first.")
+    else:
+        _ld_w = weights_df['date'].max()
+        _latest_w = weights_df[weights_df['date'] == _ld_w].copy()
+        try:
+            _pivot_w = _latest_w.pivot_table(
+                index='asset', columns='component',
+                values='adjusted_weight', aggfunc='first'
+            ).round(3)
+            st.dataframe(
+                _pivot_w.style.background_gradient(
+                    cmap='RdYlGn', axis=None),
+                use_container_width=True
+            )
+        except Exception:
+            _show = [c for c in ['asset', 'component', 'base_weight',
+                                  'adjusted_weight', 'ic_60d']
+                     if c in _latest_w.columns]
+            st.dataframe(_latest_w[_show], use_container_width=True)
+
+        if 'ic_60d' in _latest_w.columns:
+            _ic = _latest_w[['asset', 'component', 'ic_60d']].dropna()
+            if len(_ic) > 0:
+                _ic['label'] = _ic['component'] + ' / ' + _ic['asset']
+                _fig_ic = go.Figure(go.Bar(
+                    x=_ic['label'], y=_ic['ic_60d'],
+                    marker_color=[
+                        GREEN  if v >  0.10 else
+                        RED    if v < -0.05 else ORANGE
+                        for v in _ic['ic_60d']
+                    ],
+                ))
+                _fig_ic.add_hline(y=0.10,  line_dash='dot',
+                                   line_color=GREEN,
+                                   annotation_text='Boost (>0.10)')
+                _fig_ic.add_hline(y=-0.05, line_dash='dot',
+                                   line_color=RED,
+                                   annotation_text='Cut (<-0.05)')
+                _fig_ic.update_layout(
+                    height=320, template='plotly_white',
+                    title='Rolling 60-Day IC by Component / Asset',
+                    yaxis_title='IC', xaxis_tickangle=-45
+                )
+                st.plotly_chart(_fig_ic, use_container_width=True)
+
+    st.markdown("---")
+
+    # ── 3. Physical basis ─────────────────────────────────────
+    st.subheader("Physical Basis Monitor")
+    basis_df = safe_load('PHYSICAL_BASIS', limit=20)
+    if basis_df.empty:
+        st.warning("No PHYSICAL_BASIS data. Run 23_physical_basis.py first.")
+    else:
+        _ld_b   = basis_df['date'].max()
+        _latest_b = basis_df[basis_df['date'] == _ld_b].copy()
+        _bc = st.columns(min(len(_latest_b), 5))
+        for _i, (_, _row) in enumerate(_latest_b.iterrows()):
+            if _i >= 5:
+                break
+            with _bc[_i]:
+                _st  = str(_row.get('status', 'N/A'))
+                _bp  = sfloat(_row.get('basis_pct', 0))
+                _bcc = ('metric-positive' if 'CONTANGO' in _st.upper() else
+                        'metric-negative' if 'BACK'     in _st.upper() else
+                        'metric-neutral')
+                st.markdown(f"""
+                <div class='metric-card {_bcc}'>
+                    <div style='font-size:11px;color:{GRAY};
+                         text-transform:uppercase;'>
+                         {_row.get('asset','?')}</div>
+                    <div style='font-size:16px;font-weight:bold;'>
+                         {_st}</div>
+                    <div style='font-size:11px;color:{GRAY};'>
+                         Basis: {_bp:+.3f}%</div>
+                    <div style='font-size:11px;color:{GRAY};'>
+                         Trend: {_row.get('trend','?')}</div>
+                </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── 4. Execution friction ─────────────────────────────────
+    st.subheader("Execution Friction")
+    friction_df = safe_load('EXECUTION_FRICTION', limit=10)
+    if friction_df.empty:
+        st.warning(
+            "No EXECUTION_FRICTION data. Run 36_execution_friction.py first."
+        )
+    else:
+        _ld_f   = friction_df['date'].max()
+        _latest_f = friction_df[friction_df['date'] == _ld_f].copy()
+        _fc = st.columns(min(len(_latest_f), 5))
+        for _i, (_, _row) in enumerate(_latest_f.iterrows()):
+            if _i >= 5:
+                break
+            with _fc[_i]:
+                _tq  = str(_row.get('timing_quality', 'N/A'))
+                _fp  = sfloat(_row.get('total_friction_pct', 0))
+                _fcc = ('metric-positive' if 'GOOD' in _tq.upper() else
+                        'metric-negative' if 'POOR' in _tq.upper() else
+                        'metric-neutral')
+                st.markdown(f"""
+                <div class='metric-card {_fcc}'>
+                    <div style='font-size:11px;color:{GRAY};
+                         text-transform:uppercase;'>
+                         {_row.get('asset','?')}</div>
+                    <div style='font-size:16px;font-weight:bold;'>
+                         {_tq}</div>
+                    <div style='font-size:11px;color:{GRAY};'>
+                         Friction: {_fp:.3f}%</div>
+                    <div style='font-size:10px;color:{GRAY};'>
+                         {str(_row.get('timing_note',''))[:50]}</div>
+                </div>""", unsafe_allow_html=True)
+        with st.expander("📋 Full Friction Detail"):
+            _show_f = [c for c in ['date', 'asset', 'vix_regime',
+                                    'slippage_pct', 'spread_pct',
+                                    'total_friction_pct',
+                                    'timing_quality', 'timing_note']
+                       if c in _latest_f.columns]
+            st.dataframe(_latest_f[_show_f], use_container_width=True)
+
+# ══════════════════════════════════════════════════════════════
+# TAB 9 — INDIA INTELLIGENCE
+# ══════════════════════════════════════════════════════════════
+with tab9:
+    st.subheader("India Intelligence Dashboard")
+
+    # ── 1. Macro regime ───────────────────────────────────────
+    india_m = safe_load('INDIA_MACRO',   limit=5)
+    macro_r = safe_load('MACRO_REGIME',  limit=5)
+
+    _im1, _im2 = st.columns(2)
+    with _im1:
+        st.markdown("#### India Macro Regime")
+        if india_m.empty:
+            st.warning("No INDIA_MACRO data. Run 37_india_macro.py first.")
+        else:
+            _r = india_m.iloc[0]
+            _reg = str(_r.get('macro_regime', 'N/A'))
+            _rcc = ('metric-positive' if 'GOLDILOCKS' in _reg else
+                    'metric-negative' if 'STAGFLATION' in _reg else
+                    'metric-neutral')
+            st.markdown(f"""
+            <div class='metric-card {_rcc}'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     India Macro Regime</div>
+                <div style='font-size:20px;font-weight:bold;'>
+                     {_reg}</div>
+                <div style='font-size:12px;color:{GRAY};'>
+                     CPI YoY: {sfloat(_r.get('cpi_yoy')):.2f}%</div>
+                <div style='font-size:12px;color:{GRAY};'>
+                     GDP: {sfloat(_r.get('gdp_growth')):.2f}%</div>
+                <div style='font-size:12px;color:{GRAY};'>
+                     Real Rate: {sfloat(_r.get('real_rate')):+.2f}%</div>
+                <div style='font-size:12px;color:{GRAY};'>
+                     FII Signal: {_r.get('fii_macro_signal','?')}</div>
+                <div style='font-size:12px;color:{GRAY};'>
+                     NIFTY Adj: {sfloat(_r.get('nifty_adjustment')):+.2f}</div>
+            </div>""", unsafe_allow_html=True)
+
+    with _im2:
+        st.markdown("#### US vs India Regime")
+        if macro_r.empty:
+            st.warning("No MACRO_REGIME data. Run 41_macro_regime.py first.")
+        else:
+            _r = macro_r.iloc[0]
+            _us = str(_r.get('us_regime', 'N/A'))
+            _in = str(_r.get('india_regime', 'N/A'))
+            _dn = str(_r.get('divergence_note', ''))[:140]
+            st.markdown(f"""
+            <div class='metric-card metric-neutral'>
+                <div style='font-size:13px;font-weight:bold;'>
+                     🇺🇸 US: {_us}</div>
+                <div style='font-size:13px;font-weight:bold;
+                     margin-top:4px;'>🇮🇳 India: {_in}</div>
+                <div style='font-size:11px;color:{GRAY};margin-top:8px;'>
+                     {_dn}</div>
+                <hr style='margin:6px 0;border-color:#eee;'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     SP500: {sfloat(_r.get('adj_sp500')):+.2f} |
+                     NIFTY: {sfloat(_r.get('adj_nifty')):+.2f} |
+                     Gold: {sfloat(_r.get('adj_gold')):+.2f}</div>
+            </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── 2. FII / DII flows ────────────────────────────────────
+    st.markdown("#### FII / DII Flows — Last 60 Days")
+    fii_df = safe_load('FII_DII_FLOWS', limit=60)
+    if fii_df.empty:
+        st.warning(
+            "No FII_DII_FLOWS data. Run 26_institutional_flows.py first."
+        )
+    else:
+        fii_df['date'] = pd.to_datetime(fii_df['date'], errors='coerce')
+        fii_df = fii_df.sort_values('date')
+        _fig_fii = go.Figure()
+        _fig_fii.add_trace(go.Bar(
+            x=fii_df['date'], y=fii_df['fii_net'],
+            name='FII Net',
+            marker_color=[
+                GREEN if v >= 0 else RED
+                for v in fii_df['fii_net'].fillna(0)
+            ],
+        ))
+        if 'dii_net' in fii_df.columns:
+            _fig_fii.add_trace(go.Scatter(
+                x=fii_df['date'], y=fii_df['dii_net'],
+                name='DII Net',
+                line=dict(color=BLUE, width=1.5, dash='dot'),
+            ))
+        _fig_fii.update_layout(
+            height=320, template='plotly_white',
+            title='FII / DII Net Flows (₹ Cr)',
+            hovermode='x unified',
+            legend=dict(orientation='h', y=1.1)
+        )
+        st.plotly_chart(_fig_fii, use_container_width=True)
+
+    st.markdown("---")
+
+    # ── 3. Options Intelligence ───────────────────────────────
+    st.markdown("#### NIFTY Options Dashboard")
+    opts_df = safe_load('OPTIONS_INTELLIGENCE', limit=5)
+    if opts_df.empty:
+        st.warning(
+            "No OPTIONS_INTELLIGENCE data. "
+            "Run 43_options_intelligence.py first."
+        )
+    else:
+        _or = opts_df.iloc[0]
+        _oc1, _oc2, _oc3, _oc4, _oc5 = st.columns(5)
+        with _oc1:
+            _pcr = sfloat(_or.get('pcr_oi'))
+            st.markdown(f"""
+            <div class='metric-card metric-neutral'>
+                <div style='font-size:11px;color:{GRAY};'>PCR OI</div>
+                <div style='font-size:22px;font-weight:bold;'>
+                     {_pcr:.3f}</div>
+                <div style='font-size:11px;color:{GRAY};'>
+                     {_or.get('pcr_signal','?')}</div>
+            </div>""", unsafe_allow_html=True)
+        with _oc2:
+            _mp    = sfloat(_or.get('max_pain_strike'))
+            _mpdev = sfloat(_or.get('max_pain_deviation'))
+            _mpcc  = ('metric-positive' if _mpdev >  1 else
+                      'metric-negative' if _mpdev < -1 else
+                      'metric-neutral')
+            st.markdown(f"""
+            <div class='metric-card {_mpcc}'>
+                <div style='font-size:11px;color:{GRAY};'>Max Pain</div>
+                <div style='font-size:22px;font-weight:bold;'>
+                     {_mp:,.0f}</div>
+                <div style='font-size:11px;color:{GRAY};'>
+                     {_mpdev:+.2f}% from spot</div>
+                <div style='font-size:11px;color:{GRAY};'>
+                     {_or.get('max_pain_bias','?')}</div>
+            </div>""", unsafe_allow_html=True)
+        with _oc3:
+            _iv    = sfloat(_or.get('near_iv'))
+            _ivreg = str(_or.get('iv_regime', 'N/A'))
+            _ivcc  = ('metric-negative' if _ivreg in ['CRISIS', 'ELEVATED'] else
+                      'metric-positive' if _ivreg == 'COMPRESSED' else
+                      'metric-neutral')
+            st.markdown(f"""
+            <div class='metric-card {_ivcc}'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     India VIX (Near IV)</div>
+                <div style='font-size:22px;font-weight:bold;'>
+                     {_iv:.1f}</div>
+                <div style='font-size:11px;color:{GRAY};'>
+                     {_ivreg} | TS: {_or.get('iv_ts_signal','?')}</div>
+            </div>""", unsafe_allow_html=True)
+        with _oc4:
+            _sk   = sfloat(_or.get('skew_ratio'))
+            _sksig = str(_or.get('skew_signal', 'N/A'))
+            st.markdown(f"""
+            <div class='metric-card metric-neutral'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Skew (PE/CE)</div>
+                <div style='font-size:22px;font-weight:bold;'>
+                     {_sk:.2f}</div>
+                <div style='font-size:11px;color:{GRAY};'>
+                     {_sksig}</div>
+            </div>""", unsafe_allow_html=True)
+        with _oc5:
+            _cs    = sfloat(_or.get('composite_score'))
+            _csig  = str(_or.get('composite_signal', 'N/A'))
+            _cscc  = ('metric-positive' if _cs >  0.15 else
+                      'metric-negative' if _cs < -0.15 else
+                      'metric-neutral')
+            st.markdown(f"""
+            <div class='metric-card {_cscc}'>
+                <div style='font-size:11px;color:{GRAY};'>Composite</div>
+                <div style='font-size:22px;font-weight:bold;'>
+                     {_cs:+.2f}</div>
+                <div style='font-size:11px;color:{GRAY};'>{_csig}</div>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown(f"""<div class='commentary-box'>
+        📌 <strong>Options Commentary:</strong>
+        PCR OI: <strong>{sfloat(_or.get('pcr_oi')):.3f}</strong>
+        ({_or.get('pcr_signal','?')}) |
+        Max Pain: <strong>{sfloat(_or.get('max_pain_strike')):,.0f}</strong>
+        ({sfloat(_or.get('max_pain_deviation')):+.2f}%) |
+        IV Regime: <strong>{_or.get('iv_regime','?')}</strong> |
+        Skew: <strong>{_or.get('skew_signal','?')}</strong> |
+        Composite: <strong>{_or.get('composite_signal','?')}</strong>.
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── 4. GIFT-Gap history ───────────────────────────────────
+    st.markdown("#### GIFT-City Gap History — Last 10 Gaps")
+    gaps_df = safe_load('GIFT_GAPS', limit=10)
+    if gaps_df.empty:
+        st.warning(
+            "No GIFT_GAPS data. Run 39_gift_gap_engine.py first."
+        )
+    else:
+        gaps_df = gaps_df.sort_values('date', ascending=False)
+        _gcols = [c for c in ['date', 'gap_pct', 'gap_direction',
+                               'gap_size_class', 'classification',
+                               'recommendation', 'hist_fill_rate',
+                               'breakout_score', 'trap_score']
+                  if c in gaps_df.columns]
+        _disp = gaps_df[_gcols].copy()
+        if 'gap_pct' in _disp.columns:
+            _disp['gap_pct'] = _disp['gap_pct'].apply(
+                lambda v: f"{sfloat(v):+.2f}%"
+            )
+        if 'hist_fill_rate' in _disp.columns:
+            _disp['hist_fill_rate'] = _disp['hist_fill_rate'].apply(
+                lambda v: f"{sfloat(v):.0%}"
+            )
+        st.dataframe(_disp, use_container_width=True)
+
+# ══════════════════════════════════════════════════════════════
+# TAB 10 — RISK MONITOR
+# ══════════════════════════════════════════════════════════════
+with tab10:
+    st.subheader("Risk Monitor — Portfolio & Market Risk")
+
+    # ── 1. Model health ───────────────────────────────────────
+    st.markdown("#### Model Health (Rolling Sharpe per Asset)")
+    health_df = safe_load('MODEL_HEALTH', limit=60)
+    if health_df.empty:
+        st.warning("No MODEL_HEALTH data. Run 22_model_health.py first.")
+    else:
+        _ld_h     = health_df['date'].max()
+        _latest_h = health_df[health_df['date'] == _ld_h].copy()
+        _hc = st.columns(min(len(_latest_h), 5))
+        for _i, (_, _row) in enumerate(_latest_h.iterrows()):
+            if _i >= 5:
+                break
+            with _hc[_i]:
+                _sh  = sfloat(_row.get('rolling_sharpe'))
+                _hst = str(_row.get('status', 'N/A'))
+                _hcc = ('metric-positive'
+                        if any(w in _hst.upper()
+                               for w in ['GOOD', 'HEALTHY']) else
+                        'metric-negative'
+                        if any(w in _hst.upper()
+                               for w in ['POOR', 'CRITICAL']) else
+                        'metric-neutral')
+                st.markdown(f"""
+                <div class='metric-card {_hcc}'>
+                    <div style='font-size:11px;color:{GRAY};
+                         text-transform:uppercase;'>
+                         {_row.get('asset','?')}</div>
+                    <div style='font-size:20px;font-weight:bold;'>
+                         {_sh:+.2f}</div>
+                    <div style='font-size:11px;color:{GRAY};'>
+                         {_hst}</div>
+                    <div style='font-size:10px;color:{GRAY};'>
+                         Hit: {sfloat(_row.get("hit_rate")):.1%}
+                         | DD: {sfloat(_row.get("current_dd")):.1f}%
+                    </div>
+                </div>""", unsafe_allow_html=True)
+
+        if len(health_df) > 5:
+            health_df['date'] = pd.to_datetime(
+                health_df['date'], errors='coerce')
+            _fig_h = go.Figure()
+            for _ast in health_df['asset'].unique():
+                _ah = health_df[
+                    health_df['asset'] == _ast
+                ].sort_values('date')
+                if 'rolling_sharpe' in _ah.columns:
+                    _fig_h.add_trace(go.Scatter(
+                        x=_ah['date'], y=_ah['rolling_sharpe'],
+                        name=_ast, line=dict(width=1.5)
+                    ))
+            _fig_h.add_hline(y=0,   line_color='black', line_width=0.8)
+            _fig_h.add_hline(y=0.5, line_dash='dot', line_color=GREEN,
+                              annotation_text='Good (0.5)')
+            _fig_h.update_layout(
+                height=300, template='plotly_white',
+                title='Rolling Sharpe by Asset',
+                hovermode='x unified'
+            )
+            st.plotly_chart(_fig_h, use_container_width=True)
+
+    st.markdown("---")
+
+    # ── 2. Portfolio risk ─────────────────────────────────────
+    st.markdown("#### Portfolio Risk & Kelly Sizing")
+    risk_df = safe_load('PORTFOLIO_RISK', limit=20)
+    if risk_df.empty:
+        st.warning("No PORTFOLIO_RISK data. Run 27_portfolio_risk.py first.")
+    else:
+        _ld_r   = risk_df['date'].max()
+        _latest_r = risk_df[risk_df['date'] == _ld_r].copy()
+        _rc = st.columns(min(len(_latest_r), 5))
+        for _i, (_, _row) in enumerate(_latest_r.iterrows()):
+            if _i >= 5:
+                break
+            with _rc[_i]:
+                _kh   = sfloat(_row.get('kelly_half'))
+                _rbias= str(_row.get('bias', 'N/A'))
+                _cf   = str(_row.get('corr_flag', '') or '')
+                _rcc  = ('metric-positive'  if 'LONG'  in _rbias.upper() else
+                         'metric-negative'  if 'SHORT' in _rbias.upper() else
+                         'metric-neutral')
+                st.markdown(f"""
+                <div class='metric-card {_rcc}'>
+                    <div style='font-size:11px;color:{GRAY};
+                         text-transform:uppercase;'>
+                         {_row.get('asset','?')}</div>
+                    <div style='font-size:20px;font-weight:bold;'>
+                         {_kh:.1%} Kelly</div>
+                    <div style='font-size:11px;color:{GRAY};'>
+                         {_rbias}</div>
+                    <div style='font-size:10px;
+                         color:{"#C00000" if _cf else GRAY};'>
+                         {_cf if _cf else '✓ No corr flag'}</div>
+                </div>""", unsafe_allow_html=True)
+        with st.expander("📋 Full Risk Detail"):
+            st.dataframe(_latest_r, use_container_width=True)
+
+    st.markdown("---")
+
+    # ── 3. Correlation regime ─────────────────────────────────
+    st.markdown("#### Correlation Regime Monitor")
+    corr_reg = safe_load('CORRELATION_REGIMES', limit=60)
+    if corr_reg.empty:
+        st.warning(
+            "No CORRELATION_REGIMES data. "
+            "Run 28_correlation_regime.py first."
+        )
+    else:
+        _ld_cr    = corr_reg['date'].max()
+        _latest_cr = corr_reg[corr_reg['date'] == _ld_cr].copy()
+        try:
+            _pivot_c = _latest_cr.pivot_table(
+                index='asset1', columns='asset2',
+                values='corr_20d', aggfunc='first'
+            )
+            if len(_pivot_c) > 0:
+                _fig_cr = px.imshow(
+                    _pivot_c, color_continuous_scale='RdYlGn',
+                    zmin=-1, zmax=1, text_auto='.2f',
+                    title='Current 20-Day Correlation Regime'
+                )
+                _fig_cr.update_layout(
+                    height=320, template='plotly_white')
+                st.plotly_chart(_fig_cr, use_container_width=True)
+        except Exception:
+            st.dataframe(_latest_cr, use_container_width=True)
+
+        if 'shift' in _latest_cr.columns:
+            _shifts = _latest_cr[
+                _latest_cr['shift'].apply(
+                    lambda v: abs(sfloat(v)) > 0.15
+                )
+            ]
+            for _, _sr in _shifts.iterrows():
+                st.warning(
+                    f"⚠️ Correlation shift detected: "
+                    f"{_sr.get('asset1','?')} / {_sr.get('asset2','?')} "
+                    f"— 20d: {sfloat(_sr.get('corr_20d')):+.2f}, "
+                    f"60d: {sfloat(_sr.get('corr_60d')):+.2f}"
+                )
+
+    st.markdown("---")
+
+    # ── 4. Composite Liquidity ────────────────────────────────
+    st.markdown("#### Composite Liquidity Score")
+    liq_comp = safe_load('COMPOSITE_LIQUIDITY', limit=60)
+    if liq_comp.empty:
+        st.warning(
+            "No COMPOSITE_LIQUIDITY data. "
+            "Run 40_composite_liquidity.py first."
+        )
+    else:
+        _lrow = liq_comp.iloc[0]
+        _lq1, _lq2, _lq3 = st.columns(3)
+        with _lq1:
+            _lscore = sfloat(_lrow.get('composite_score'))
+            _lreg   = str(_lrow.get('regime', 'N/A'))
+            _lcc    = 'metric-positive' if _lscore > 0 else 'metric-negative'
+            st.markdown(f"""
+            <div class='metric-card {_lcc}'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Composite Liquidity</div>
+                <div style='font-size:26px;font-weight:bold;'>
+                     {_lscore:+.3f}</div>
+                <div style='font-size:12px;color:{GRAY};'>
+                     {_lreg}</div>
+            </div>""", unsafe_allow_html=True)
+        with _lq2:
+            st.markdown(f"""
+            <div class='metric-card metric-neutral'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Liquidity Adjustments</div>
+                <div style='font-size:12px;'>
+                     SP500: {sfloat(_lrow.get('adj_sp500')):+.3f}</div>
+                <div style='font-size:12px;'>
+                     NIFTY: {sfloat(_lrow.get('adj_nifty')):+.3f}</div>
+                <div style='font-size:12px;'>
+                     Gold: {sfloat(_lrow.get('adj_gold')):+.3f}</div>
+                <div style='font-size:12px;'>
+                     Silver: {sfloat(_lrow.get('adj_silver')):+.3f}</div>
+            </div>""", unsafe_allow_html=True)
+        with _lq3:
+            st.markdown(f"""
+            <div class='metric-card metric-neutral'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Component Scores</div>
+                <div style='font-size:11px;'>
+                     TGA: {sfloat(_lrow.get('tga_score')):+.2f}</div>
+                <div style='font-size:11px;'>
+                     Fed BS: {sfloat(_lrow.get('fed_bs_score')):+.2f}</div>
+                <div style='font-size:11px;'>
+                     Term Prem: {sfloat(_lrow.get('term_premium_score')):+.2f}
+                </div>
+                <div style='font-size:11px;'>
+                     Credit: {sfloat(_lrow.get('credit_score')):+.2f}</div>
+            </div>""", unsafe_allow_html=True)
+
+        if len(liq_comp) > 2:
+            _lhist = liq_comp.sort_values('date')
+            _lhist['date'] = pd.to_datetime(_lhist['date'], errors='coerce')
+            _fig_lq = go.Figure(go.Scatter(
+                x=_lhist['date'], y=_lhist['composite_score'],
+                fill='tozeroy',
+                fillcolor='rgba(30,107,60,0.12)',
+                line=dict(color=BLUE, width=1.5)
+            ))
+            _fig_lq.add_hline(y=0, line_color='black', line_width=0.8)
+            _fig_lq.update_layout(
+                height=260, template='plotly_white',
+                title='Composite Liquidity History',
+                yaxis_title='Score'
+            )
+            st.plotly_chart(_fig_lq, use_container_width=True)
+
+    st.markdown("---")
+
+    # ── 5. Geopolitical premium ───────────────────────────────
+    st.markdown("#### Geopolitical Risk Premium")
+    geo_df = safe_load('GEOPOLITICAL_PREMIUM', limit=30)
+    if geo_df.empty:
+        st.warning(
+            "No GEOPOLITICAL_PREMIUM data. "
+            "Run 33_geopolitical_premium.py first."
+        )
+    else:
+        _gr = geo_df.iloc[0]
+        _gp1, _gp2 = st.columns(2)
+        with _gp1:
+            _cprem = sfloat(_gr.get('crude_premium_pct'))
+            _ccls  = str(_gr.get('crude_classification', 'N/A'))
+            _cgcc  = ('metric-negative' if _cprem > 10 else
+                      'metric-neutral'  if _cprem > 0  else
+                      'metric-positive')
+            st.markdown(f"""
+            <div class='metric-card {_cgcc}'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Crude Geo Premium</div>
+                <div style='font-size:22px;font-weight:bold;'>
+                     ${sfloat(_gr.get('crude_premium_usd')):+.1f}</div>
+                <div style='font-size:12px;color:{GRAY};'>
+                     {_cprem:+.1f}% | {_ccls}</div>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Spot: ${sfloat(_gr.get('crude_spot')):.1f} |
+                     Fair: ${sfloat(_gr.get('crude_fair_value')):.1f}</div>
+                <div style='font-size:10px;color:{GRAY};'>
+                     Rank: {sfloat(_gr.get('crude_pct_rank')):.0f}th pct</div>
+            </div>""", unsafe_allow_html=True)
+        with _gp2:
+            _gprem = sfloat(_gr.get('gold_premium_pct'))
+            _gcls  = str(_gr.get('gold_classification', 'N/A'))
+            _ggcc  = ('metric-negative' if _gprem > 10 else
+                      'metric-neutral'  if _gprem > 0  else
+                      'metric-positive')
+            st.markdown(f"""
+            <div class='metric-card {_ggcc}'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Gold Geo Premium</div>
+                <div style='font-size:22px;font-weight:bold;'>
+                     ${sfloat(_gr.get('gold_premium_usd')):+.1f}</div>
+                <div style='font-size:12px;color:{GRAY};'>
+                     {_gprem:+.1f}% | {_gcls}</div>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Spot: ${sfloat(_gr.get('gold_spot')):.1f} |
+                     Fair: ${sfloat(_gr.get('gold_fair_value')):.1f}</div>
+                <div style='font-size:10px;color:{GRAY};'>
+                     Rank: {sfloat(_gr.get('gold_pct_rank')):.0f}th pct</div>
+            </div>""", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+# TAB 11 — INTELLIGENCE
+# ══════════════════════════════════════════════════════════════
+with tab11:
+    st.subheader("Market Intelligence — Narrative & Relative Value")
+
+    # ── 1. Narrative engine ───────────────────────────────────
+    st.markdown("#### Narrative Engine — Active Themes")
+    narr_df = safe_load('NARRATIVE_SCORES', limit=60)
+    if narr_df.empty:
+        st.warning(
+            "No NARRATIVE_SCORES data. Run 34_narrative_engine.py first."
+        )
+    else:
+        _ld_n    = narr_df['date'].max()
+        _latest_n = narr_df[narr_df['date'] == _ld_n].copy()
+        _latest_n = _latest_n.sort_values('normalised', ascending=False)
+        _top5 = _latest_n.head(5)
+        _fig_narr = go.Figure(go.Bar(
+            x=_top5['narrative'],
+            y=_top5['normalised'],
+            marker_color=[
+                GREEN  if sfloat(v) >= 70 else
+                ORANGE if sfloat(v) >= 40 else
+                GRAY   for v in _top5['normalised']
+            ],
+            text=_top5.get('status', pd.Series([''] * len(_top5))),
+            textposition='outside',
+        ))
+        _fig_narr.update_layout(
+            height=340, template='plotly_white',
+            title='Top 5 Active Market Narratives (0–100)',
+            yaxis_title='Score', yaxis_range=[0, 115]
+        )
+        st.plotly_chart(_fig_narr, use_container_width=True)
+
+        _ncols = [c for c in ['narrative', 'score_7d', 'score_14d',
+                               'score_30d', 'normalised',
+                               'status', 'momentum_7d']
+                  if c in _latest_n.columns]
+        if 'narrative' in _ncols:
+            st.dataframe(
+                _latest_n[_ncols].set_index('narrative'),
+                use_container_width=True
+            )
+
+    st.markdown("---")
+
+    # ── 2. RV Ratios ──────────────────────────────────────────
+    st.markdown("#### Relative Value Ratios")
+    rv_df = safe_load('RV_RATIOS', limit=60)
+    if rv_df.empty:
+        st.warning(
+            "No RV_RATIOS data. Run 38_rv_ratio_overlay.py first."
+        )
+    else:
+        _rrow  = rv_df.iloc[0]
+        _rv1, _rv2, _rv3 = st.columns(3)
+
+        def _rv_card(label, ratio, pct, signal, rotation):
+            _cc = ('metric-negative' if 'EXTREME_HIGH' in str(signal) else
+                   'metric-positive' if 'EXTREME_LOW'  in str(signal) else
+                   'metric-neutral')
+            return (
+                f"<div class='metric-card {_cc}'>"
+                f"<div style='font-size:11px;color:{GRAY};'>{label}</div>"
+                f"<div style='font-size:22px;font-weight:bold;'>"
+                f"{sfloat(ratio):.2f}</div>"
+                f"<div style='font-size:11px;color:{GRAY};'>"
+                f"{sfloat(pct):.0f}th pct | {signal}</div>"
+                f"<div style='font-size:11px;color:{GRAY};'>"
+                f"→ {rotation}</div></div>"
+            )
+
+        with _rv1:
+            st.markdown(_rv_card(
+                'Gold / Silver',
+                _rrow.get('gs_ratio'),  _rrow.get('gs_pct_5y'),
+                _rrow.get('gs_signal'), _rrow.get('gs_rotation')
+            ), unsafe_allow_html=True)
+        with _rv2:
+            st.markdown(_rv_card(
+                'Gold / SP500',
+                _rrow.get('gsp_ratio'),  _rrow.get('gsp_pct_5y'),
+                _rrow.get('gsp_signal'), _rrow.get('gsp_rotation')
+            ), unsafe_allow_html=True)
+        with _rv3:
+            st.markdown(_rv_card(
+                'Crude / Gold',
+                _rrow.get('cg_ratio'),  _rrow.get('cg_pct_5y'),
+                _rrow.get('cg_signal'), _rrow.get('cg_rotation')
+            ), unsafe_allow_html=True)
+
+        if len(rv_df) > 3:
+            _rvh = rv_df.sort_values('date')
+            _rvh['date'] = pd.to_datetime(_rvh['date'], errors='coerce')
+            _fig_rv = make_subplots(
+                rows=3, cols=1, shared_xaxes=True,
+                subplot_titles=(
+                    'Gold/Silver', 'Gold/SP500', 'Crude/Gold'),
+                vertical_spacing=0.08
+            )
+            _fig_rv.add_trace(go.Scatter(
+                x=_rvh['date'], y=_rvh['gs_ratio'],
+                name='G/S', line=dict(color=ORANGE, width=1.4)
+            ), row=1, col=1)
+            _fig_rv.add_trace(go.Scatter(
+                x=_rvh['date'], y=_rvh['gsp_ratio'],
+                name='G/SP', line=dict(color=BLUE, width=1.4)
+            ), row=2, col=1)
+            _fig_rv.add_trace(go.Scatter(
+                x=_rvh['date'], y=_rvh['cg_ratio'],
+                name='C/G', line=dict(color=RED, width=1.4)
+            ), row=3, col=1)
+            _fig_rv.update_layout(
+                height=440, template='plotly_white',
+                hovermode='x unified'
+            )
+            st.plotly_chart(_fig_rv, use_container_width=True)
+
+    st.markdown("---")
+
+    # ── 3. Polarization ───────────────────────────────────────
+    st.markdown("#### Market Polarization (Mag-7 vs Breadth)")
+    polar_df = safe_load('POLARIZATION_DATA', limit=30)
+    if polar_df.empty:
+        st.warning(
+            "No POLARIZATION_DATA data. "
+            "Run 32_polarization_monitor.py first."
+        )
+    else:
+        _pr = polar_df.iloc[0]
+        _pp1, _pp2 = st.columns(2)
+        with _pp1:
+            _m7r = sfloat(_pr.get('mag7_return'))
+            _pcc = 'metric-positive' if _m7r > 0 else 'metric-negative'
+            st.markdown(f"""
+            <div class='metric-card {_pcc}'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Mag-7 Return (latest)</div>
+                <div style='font-size:22px;font-weight:bold;'>
+                     {_m7r:+.2f}%</div>
+            </div>""", unsafe_allow_html=True)
+        with _pp2:
+            _ret_cols = [c for c in polar_df.columns
+                         if c.startswith('ret_')][:5]
+            _rhtml = ''.join([
+                f"<div style='font-size:11px;'>"
+                f"{c.replace('ret_','')}: "
+                f"{sfloat(_pr.get(c)):+.2f}%</div>"
+                for c in _ret_cols
+            ])
+            st.markdown(f"""
+            <div class='metric-card metric-neutral'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Individual Returns</div>
+                {_rhtml}
+            </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── 4. Liquidity Pulse ────────────────────────────────────
+    st.markdown("#### Liquidity Pulse Monitor")
+    pulse_df = safe_load('LIQUIDITY_PULSE', limit=30)
+    if pulse_df.empty:
+        st.warning(
+            "No LIQUIDITY_PULSE data. Run 30_liquidity_pulse.py first."
+        )
+    else:
+        _plr = pulse_df.iloc[0]
+        _tga_chg = sfloat(_plr.get('tga_4wk_change'))
+        _tga_sig = str(_plr.get('tga_signal', 'N/A'))
+        _tp      = sfloat(_plr.get('term_premium'))
+        _tp_sig  = str(_plr.get('term_premium_signal', 'N/A'))
+
+        _lp1, _lp2 = st.columns(2)
+        with _lp1:
+            _tcc = 'metric-positive' if _tga_chg < 0 else 'metric-negative'
+            st.markdown(f"""
+            <div class='metric-card {_tcc}'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     TGA 4-Week Change</div>
+                <div style='font-size:22px;font-weight:bold;'>
+                     ${_tga_chg:+.0f}B</div>
+                <div style='font-size:11px;color:{GRAY};'>
+                     {_tga_sig}</div>
+            </div>""", unsafe_allow_html=True)
+        with _lp2:
+            st.markdown(f"""
+            <div class='metric-card metric-neutral'>
+                <div style='font-size:11px;color:{GRAY};'>
+                     Term Premium</div>
+                <div style='font-size:22px;font-weight:bold;'>
+                     {_tp:+.3f}%</div>
+                <div style='font-size:11px;color:{GRAY};'>
+                     {_tp_sig}</div>
+            </div>""", unsafe_allow_html=True)
+
+        # All signal columns as a summary table
+        _sig_cols = [c for c in pulse_df.columns if '_signal' in c.lower()]
+        if _sig_cols:
+            _sig_summary = {
+                c.replace('_signal', '').replace('_', ' ').title():
+                str(_plr.get(c, 'N/A'))
+                for c in _sig_cols
+            }
+            st.dataframe(
+                pd.DataFrame.from_dict(
+                    _sig_summary, orient='index',
+                    columns=['Signal']
+                ),
+                use_container_width=True
+            )
 
 st.markdown("---")
 
