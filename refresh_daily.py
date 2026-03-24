@@ -53,6 +53,7 @@ scripts = [
     '30_liquidity_pulse.py',       # TGA, term premium, Fed BS, fiscal stance
     '31_yield_equity_beta.py',     # Rolling yield-equity beta, sensitivity regime
     '32_polarization_monitor.py',  # Mag-7 vs Russell 2000 breadth & concentration
+    '33_geopolitical_premium.py',  # Oil & Gold risk premium vs fundamental fair value
 ]
 
 failed = []
