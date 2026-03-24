@@ -59,6 +59,7 @@ scripts = [
     '36_execution_friction.py',    # Slippage, spread, backtest adjustment, trade timing
     '37_india_macro.py',           # India macro regime + FII integration + NIFTY adjustment
     '38_rv_ratio_overlay.py',      # Gold/Silver, Gold/SP500, Crude/Gold RV ratios & rotation signals
+    '39_gift_gap_engine.py',       # Overnight NIFTY gap detection, fill-rate analysis, Breakout vs Trap
 ]
 
 failed = []
