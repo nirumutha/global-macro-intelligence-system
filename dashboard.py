@@ -27,7 +27,7 @@ RED      = "#C00000"
 BLUE     = "#1F3864"
 MID_BLUE = "#2E75B6"
 ORANGE   = "#C55A11"
-GRAY     = "#595959"
+GRAY     = "#CCCCCC"
 LIGHT    = "#F4F4F4"
 
 # ── CSS ───────────────────────────────────────────────────────
@@ -35,12 +35,13 @@ st.markdown("""
 <style>
     .main { background-color: #FAFAFA; }
     .metric-card {
-        background: white;
+        background: rgba(255,255,255,0.08);
         border-radius: 8px;
         padding: 16px 20px;
         border-left: 5px solid #2E75B6;
         box-shadow: 0 1px 4px rgba(0,0,0,0.08);
         margin-bottom: 8px;
+        color: #FFFFFF;
     }
     .metric-positive { border-left-color: #1E6B3C !important; }
     .metric-negative { border-left-color: #C00000 !important; }
@@ -56,17 +57,17 @@ st.markdown("""
     .badge-short   { background: #FFCCCC; color: #C00000; }
     .badge-neutral { background: #FFF3CD; color: #856404; }
     .commentary-box {
-        background: #EDE7F6;
+        background: rgba(92,45,145,0.3);
         border-left: 4px solid #5C2D91;
         padding: 10px 16px;
         border-radius: 4px;
         font-size: 13px;
-        color: #333;
+        color: #FFFFFF;
         margin: 8px 0;
     }
     .delta-positive { color: #1E6B3C; font-weight: bold; }
     .delta-negative { color: #C00000; font-weight: bold; }
-    h1, h2, h3 { color: #1F3864; }
+    h1, h2, h3 { color: #FFFFFF; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -421,11 +422,11 @@ try:
                         f" in {_diff}d ({_ev.get('country','?')})"
                     )
                 _border = RED if len(_soon) > 0 else ORANGE
-                _bg     = '#FFF0F0' if len(_soon) > 0 else '#FFFBEA'
+                _bg     = 'rgba(192,0,0,0.25)' if len(_soon) > 0 else 'rgba(197,90,17,0.2)'
                 st.markdown(
                     f"<div style='background:{_bg};border-left:4px solid "
                     f"{_border};padding:8px 16px;border-radius:4px;"
-                    f"margin-bottom:12px;font-size:13px;'>"
+                    f"margin-bottom:12px;font-size:13px;color:#FFFFFF;'>"
                     f"⚠️ <strong>High-Impact Events:</strong> &nbsp;"
                     f"{'&nbsp;&nbsp;|&nbsp;&nbsp;'.join(_parts)}</div>",
                     unsafe_allow_html=True
@@ -461,7 +462,7 @@ with col2:
         <div style='font-size:11px; color:{GRAY};
              text-transform:uppercase;'>NIFTY 50</div>
         <div style='font-size:20px; font-weight:bold;
-             color:#1F3864;'>{curr_nifty:,.0f}</div>
+             color:#FFFFFF;'>{curr_nifty:,.0f}</div>
         <div>{delta_arrow(d_nifty)}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -472,7 +473,7 @@ with col3:
         <div style='font-size:11px; color:{GRAY};
              text-transform:uppercase;'>S&P 500</div>
         <div style='font-size:20px; font-weight:bold;
-             color:#1F3864;'>{curr_sp500:,.0f}</div>
+             color:#FFFFFF;'>{curr_sp500:,.0f}</div>
         <div>{delta_arrow(d_sp)}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -483,7 +484,7 @@ with col4:
         <div style='font-size:11px; color:{GRAY};
              text-transform:uppercase;'>Gold (USD)</div>
         <div style='font-size:20px; font-weight:bold;
-             color:#1F3864;'>${curr_gold:,.0f}</div>
+             color:#FFFFFF;'>${curr_gold:,.0f}</div>
         <div>{delta_arrow(d_gold)}</div>
     </div>""", unsafe_allow_html=True)
 
@@ -498,7 +499,7 @@ with col5:
         <div style='font-size:11px; color:{GRAY};
              text-transform:uppercase;'>Sentiment</div>
         <div style='font-size:20px; font-weight:bold;
-             color:#1F3864;'>{overall_sentiment}</div>
+             color:#FFFFFF;'>{overall_sentiment}</div>
         <div style='font-size:11px; color:{GRAY};'>
              Score: {sentiment_score:+.3f}</div>
     </div>""", unsafe_allow_html=True)
@@ -570,7 +571,7 @@ def decision_badge_html(label, asset_key):
         except Exception:
             pass
     return (
-        f"<div style='text-align:center;padding:10px;background:white;"
+        f"<div style='text-align:center;padding:10px;background:rgba(255,255,255,0.08);"
         f"border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);'>"
         f"<div style='font-size:11px;color:{GRAY};margin-bottom:4px;'>"
         f"{label}</div>"
@@ -1243,7 +1244,7 @@ with tab6:
                          text-transform:uppercase;'>
                          Analog {i+1}</div>
                     <div style='font-size:16px;
-                         font-weight:bold; color:#1F3864;'>
+                         font-weight:bold; color:#FFFFFF;'>
                          {date.strftime('%b %Y')}</div>
                     <div style='font-size:12px; color:{GRAY};'>
                          Similarity: {sim:.1f}%</div>
@@ -1291,7 +1292,7 @@ with tab6:
                              text-transform:uppercase;'>
                              {asset}</div>
                         <div style='font-size:18px;
-                             font-weight:bold; color:#1F3864;'>
+                             font-weight:bold; color:#FFFFFF;'>
                              {arrow} {prob:.0f}%</div>
                         <div style='font-size:11px; color:{GRAY};'>
                              Median: {median:+.1f}%</div>
@@ -1896,7 +1897,7 @@ with tab10:
                          {_sh:+.2f}</div>
                     <div style='font-size:11px;color:{GRAY};'>
                          {_hst}</div>
-                    <div style='font-size:10px;color:{GRAY};'>
+                    <div style='font-size:18px;color:#FFFFFF;font-weight:bold;'>
                          Hit: {sfloat(_row.get("hit_rate")):.1%}
                          | DD: {sfloat(_row.get("current_dd")):.1f}%
                     </div>
@@ -2027,9 +2028,9 @@ with tab10:
             <div class='metric-card {_lcc}'>
                 <div style='font-size:11px;color:{GRAY};'>
                      Composite Liquidity</div>
-                <div style='font-size:26px;font-weight:bold;'>
+                <div style='font-size:20px;font-weight:bold;color:#FFFFFF;'>
                      {_lscore:+.3f}</div>
-                <div style='font-size:12px;color:{GRAY};'>
+                <div style='font-size:12px;color:#FFFFFF;font-weight:bold;'>
                      {_lreg}</div>
             </div>""", unsafe_allow_html=True)
         with _lq2:
@@ -2104,7 +2105,7 @@ with tab10:
                      Crude Geo Premium</div>
                 <div style='font-size:22px;font-weight:bold;'>
                      ${sfloat(_gr.get('crude_premium_usd')):+.1f}</div>
-                <div style='font-size:12px;color:{GRAY};'>
+                <div style='font-size:12px;color:#FFFFFF;font-weight:bold;'>
                      {_cprem:+.1f}% | {_ccls}</div>
                 <div style='font-size:11px;color:{GRAY};'>
                      Spot: ${sfloat(_gr.get('crude_spot')):.1f} |
@@ -2124,7 +2125,7 @@ with tab10:
                      Gold Geo Premium</div>
                 <div style='font-size:22px;font-weight:bold;'>
                      ${sfloat(_gr.get('gold_premium_usd')):+.1f}</div>
-                <div style='font-size:12px;color:{GRAY};'>
+                <div style='font-size:12px;color:#FFFFFF;font-weight:bold;'>
                      {_gprem:+.1f}% | {_gcls}</div>
                 <div style='font-size:11px;color:{GRAY};'>
                      Spot: ${sfloat(_gr.get('gold_spot')):.1f} |
