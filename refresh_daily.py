@@ -60,6 +60,7 @@ scripts = [
     '37_india_macro.py',           # India macro regime + FII integration + NIFTY adjustment
     '38_rv_ratio_overlay.py',      # Gold/Silver, Gold/SP500, Crude/Gold RV ratios & rotation signals
     '39_gift_gap_engine.py',       # Overnight NIFTY gap detection, fill-rate analysis, Breakout vs Trap
+    '40_composite_liquidity.py',   # Cross-module liquidity composite score + asset-specific adjustments
 ]
 
 failed = []
