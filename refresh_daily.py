@@ -55,6 +55,7 @@ scripts = [
     '32_polarization_monitor.py',  # Mag-7 vs Russell 2000 breadth & concentration
     '33_geopolitical_premium.py',  # Oil & Gold risk premium vs fundamental fair value
     '34_narrative_engine.py',      # Market narrative scoring, momentum, asset impact map
+    '35_dynamic_weights.py',       # Monthly IC-based weight adjustment for decision engine
 ]
 
 failed = []
