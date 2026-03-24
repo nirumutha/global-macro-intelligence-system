@@ -62,6 +62,7 @@ scripts = [
     '39_gift_gap_engine.py',       # Overnight NIFTY gap detection, fill-rate analysis, Breakout vs Trap
     '40_composite_liquidity.py',   # Cross-module liquidity composite score + asset-specific adjustments
     '41_macro_regime.py',          # Four-quadrant US+India macro regime, transitions, signal adjustments
+    '42_event_classification.py',  # Event type detection → directional asset impact mapping
 ]
 
 failed = []
