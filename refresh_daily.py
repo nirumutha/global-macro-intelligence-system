@@ -57,6 +57,7 @@ scripts = [
     '34_narrative_engine.py',      # Market narrative scoring, momentum, asset impact map
     '35_dynamic_weights.py',       # Monthly IC-based weight adjustment for decision engine
     '36_execution_friction.py',    # Slippage, spread, backtest adjustment, trade timing
+    '37_india_macro.py',           # India macro regime + FII integration + NIFTY adjustment
 ]
 
 failed = []
