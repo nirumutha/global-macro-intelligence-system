@@ -52,6 +52,7 @@ scripts = [
     '29_external_intelligence.py', # Tiered RSS + FinBERT + theme extraction
     '30_liquidity_pulse.py',       # TGA, term premium, Fed BS, fiscal stance
     '31_yield_equity_beta.py',     # Rolling yield-equity beta, sensitivity regime
+    '32_polarization_monitor.py',  # Mag-7 vs Russell 2000 breadth & concentration
 ]
 
 failed = []
