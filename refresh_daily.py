@@ -58,6 +58,7 @@ scripts = [
     '35_dynamic_weights.py',       # Monthly IC-based weight adjustment for decision engine
     '36_execution_friction.py',    # Slippage, spread, backtest adjustment, trade timing
     '37_india_macro.py',           # India macro regime + FII integration + NIFTY adjustment
+    '38_rv_ratio_overlay.py',      # Gold/Silver, Gold/SP500, Crude/Gold RV ratios & rotation signals
 ]
 
 failed = []
